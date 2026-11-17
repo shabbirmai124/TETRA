@@ -78,6 +78,9 @@ export const ColorGame: React.FC<ColorGameProps> = ({
       options.startLevel,
     );
   }
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __tetraEngine?: ColorEngine }).__tetraEngine = engineRef.current;
+  }
 
   const [hud, setHud] = useState<ColorSnapshot>(() => engineRef.current!.getSnapshot());
 

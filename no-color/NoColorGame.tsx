@@ -63,6 +63,9 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
       options.startLevel,
     );
   }
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __tetraEngine?: NoColorEngine }).__tetraEngine = engineRef.current;
+  }
 
   const [hud, setHud] = useState<NoColorSnapshot>(() => engineRef.current!.getSnapshot());
 
