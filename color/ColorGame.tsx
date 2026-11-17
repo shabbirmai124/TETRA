@@ -1,0 +1,943 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Pause, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import {
+  COLOR_PIECE_THEMES,
+  C_COLS,
+  C_ROWS,
+  C_VISIBLE_START,
+  ColorEngine,
+  ColorMode,
+  ColorSnapshot,
+  ColorStepEvent,
+  PARTICLE_POOL_CAP,
+  PARTICLE_STRIDE,
+} from './engine';
+import { GameOptions, ScreenState } from '../src/types/game';
+import { PiecePreview } from '../src/components/PiecePreview';
+import { soundSynth } from '../src/audio/synth';
+
+const BEST_SCORE_PREFIX = 'tetra_color_best_v1_';
+
+const loadBestScore = (mode: ColorMode): number => {
+  try {
+    const raw = localStorage.getItem(`${BEST_SCORE_PREFIX}${mode}`);
+    return raw ? Math.max(0, parseInt(raw, 10) || 0) : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const saveBestScore = (mode: ColorMode, score: number): void => {
+  try {
+    localStorage.setItem(`${BEST_SCORE_PREFIX}${mode}`, String(score));
+  } catch {
+    // Ignore storage quota issues
+  }
+};
+
+const formatClock = (seconds: number): string => {
+  const clamped = Math.max(0, seconds);
+  const mins = Math.floor(clamped / 60);
+  const secs = Math.floor(clamped % 60);
+  const tenths = Math.floor((clamped * 10) % 10);
+  return `${mins}:${secs.toString().padStart(2, '0')}.${tenths}`;
+};
+
+interface ColorGameProps {
+  mode: ColorMode;
+  screen: ScreenState;
+  runNonce: number;
+  options: GameOptions;
+  onPause: () => void;
+  onFinish: (snapshot: ColorSnapshot) => void;
+  onToggleSound: () => void;
+}
+
+const VISIBLE_ROWS = C_ROWS - C_VISIBLE_START; // 20
+const CELL_PX = 28;
+const CANVAS_W = C_COLS * CELL_PX; // 280
+const CANVAS_H = VISIBLE_ROWS * CELL_PX; // 560
+
+export const ColorGame: React.FC<ColorGameProps> = ({
+  mode,
+  screen,
+  runNonce,
+  options,
+  onPause,
+  onFinish,
+  onToggleSound,
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const engineRef = useRef<ColorEngine | null>(null);
+  if (!engineRef.current) {
+    engineRef.current = new ColorEngine(
+      mode,
+      Date.now() ^ 0x6c8e9cf5,
+      loadBestScore(mode),
+      options.startLevel,
+    );
+  }
+
+  const [hud, setHud] = useState<ColorSnapshot>(() => engineRef.current!.getSnapshot());
+
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const onPauseRef = useRef(onPause);
+  onPauseRef.current = onPause;
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
+
+  const heldRef = useRef({
+    left: false,
+    right: false,
+    down: false,
+    moveDir: 0 as -1 | 0 | 1,
+    dasTimerMs: 0,
+    arrTimerMs: 0,
+    softTimerMs: 0,
+  });
+
+  const lastHudSigRef = useRef('');
+  const lastRenderSigRef = useRef('');
+  const wakeLoopRef = useRef<() => void>(() => {});
+  const gridCacheRef = useRef<{ canvas: HTMLCanvasElement; gridLines: boolean } | null>(null);
+
+  const syncHudIfChanged = useCallback((force = false) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const snap = engine.getSnapshot();
+    const clockBucket = Math.floor(snap.elapsedSec * 5); // 5Hz HUD clock refresh
+    const sig = `${snap.mode}|${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.canHold}|${snap.nextIds.join(',')}|${snap.calloutId}|${snap.lastCallout}|${clockBucket}|${snap.gameOver}|${snap.victory}`;
+    if (force || sig !== lastHudSigRef.current) {
+      lastHudSigRef.current = sig;
+      if (snap.bestScore > loadBestScore(snap.mode)) {
+        saveBestScore(snap.mode, snap.bestScore);
+      }
+      setHud(snap);
+    }
+  }, []);
+
+  const triggerSound = useCallback((ev: ColorStepEvent) => {
+    if (!optionsRef.current.soundEnabled || ev === 'none' || ev === 'lock') return;
+    soundSynth.play(ev);
+  }, []);
+
+  // Draw faceted gem block
+  const drawFacetedCell = (
+    ctx: CanvasRenderingContext2D,
+    gx: number,
+    gy: number,
+    pieceId: number,
+    lockPulse: number,
+  ) => {
+    const theme = COLOR_PIECE_THEMES[pieceId];
+    if (!theme) return;
+    const x = gx * CELL_PX;
+    const y = gy * CELL_PX;
+    const s = CELL_PX;
+
+    // Outer dark mortar border
+    ctx.fillStyle = '#0B0F17';
+    ctx.fillRect(x, y, s, s);
+
+    // Core fill
+    ctx.fillStyle = theme.fill;
+    ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+
+    // Top bevel triangle
+    ctx.fillStyle = theme.light;
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + 1);
+    ctx.lineTo(x + s - 1, y + 1);
+    ctx.lineTo(x + s - 5, y + 5);
+    ctx.lineTo(x + 5, y + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Left bevel
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + 1);
+    ctx.lineTo(x + 5, y + 5);
+    ctx.lineTo(x + 5, y + s - 5);
+    ctx.lineTo(x + 1, y + s - 1);
+    ctx.closePath();
+    ctx.fill();
+
+    // Bottom & right deep bevel
+    ctx.fillStyle = theme.dark;
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + s - 1);
+    ctx.lineTo(x + s - 1, y + s - 1);
+    ctx.lineTo(x + s - 1, y + 1);
+    ctx.lineTo(x + s - 5, y + 5);
+    ctx.lineTo(x + s - 5, y + s - 5);
+    ctx.lineTo(x + 5, y + s - 5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Specular inner facet
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.fillRect(x + 6, y + 6, s - 12, s - 12);
+
+    if (lockPulse > 0.05) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.45, lockPulse * 0.4)})`;
+      ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+    }
+  };
+
+  // Dirty-checked Canvas2D render with offscreen cached matrix grid + opaque { alpha: false } backbuffer
+  const renderCanvas = useCallback((force = false, now = performance.now()) => {
+    const canvas = canvasRef.current;
+    const engine = engineRef.current;
+    if (!canvas || !engine) return;
+
+    if (!ctxRef.current) {
+      ctxRef.current = canvas.getContext('2d', { alpha: false });
+    }
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+
+    const opts = optionsRef.current;
+    const hasFx = engine.hasActiveVisualEffects();
+    const lockBucket = Math.floor(engine.getLockProgress() * 4);
+    const sig = hasFx
+      ? `fx:${Math.round(now)}`
+      : `${engine.boardRevision}|${lockBucket}|${opts.gridLines ? 1 : 0}|${opts.ghostPiece ? 1 : 0}|${engine.gameOver ? 1 : 0}|${engine.victory ? 1 : 0}`;
+    if (!force && sig === lastRenderSigRef.current) {
+      return;
+    }
+    lastRenderSigRef.current = sig;
+
+    ctx.save();
+    // Decaying camera shake (trauma^2)
+    if (engine.shakeTrauma > 0.005) {
+      const mag = engine.shakeTrauma * engine.shakeTrauma * 5.5;
+      const sx = Math.sin(now * 0.09) * mag;
+      const sy = Math.cos(now * 0.13) * mag;
+      ctx.fillStyle = '#0D1017';
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      ctx.translate(sx, sy);
+    }
+
+    // Blit pre-cached obsidian well + static grid lines in 1 call
+    if (!gridCacheRef.current || gridCacheRef.current.gridLines !== opts.gridLines) {
+      const off = gridCacheRef.current?.canvas ?? document.createElement('canvas');
+      off.width = CANVAS_W;
+      off.height = CANVAS_H;
+      const octx = off.getContext('2d', { alpha: false });
+      if (octx) {
+        octx.fillStyle = '#0D1017';
+        octx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+        if (opts.gridLines) {
+          octx.strokeStyle = '#181E2B';
+          octx.lineWidth = 1;
+          octx.beginPath();
+          for (let c = 1; c < C_COLS; c++) {
+            const x = c * CELL_PX + 0.5;
+            octx.moveTo(x, 0);
+            octx.lineTo(x, CANVAS_H);
+          }
+          for (let r = 1; r < VISIBLE_ROWS; r++) {
+            const y = r * CELL_PX + 0.5;
+            octx.moveTo(0, y);
+            octx.lineTo(CANVAS_W, y);
+          }
+          octx.stroke();
+        }
+      }
+      gridCacheRef.current = { canvas: off, gridLines: opts.gridLines };
+    }
+    ctx.drawImage(gridCacheRef.current.canvas, 0, 0);
+
+    // Locked board cells
+    for (let r = C_VISIBLE_START; r < C_ROWS; r++) {
+      const gy = r - C_VISIBLE_START;
+      const rowOff = r * C_COLS;
+      for (let c = 0; c < C_COLS; c++) {
+        const cid = engine.board[rowOff + c];
+        if (cid !== 0) {
+          drawFacetedCell(ctx, c, gy, cid, 0);
+        }
+      }
+    }
+
+    if (!engine.gameOver && !engine.victory) {
+      const mask = engine.getMask(engine.activeId, engine.activeRot);
+      const activeTheme = COLOR_PIECE_THEMES[engine.activeId];
+
+      // Ghost piece
+      if (opts.ghostPiece && engine.ghostY !== engine.activeY && activeTheme) {
+        ctx.save();
+        ctx.strokeStyle = activeTheme.light;
+        ctx.fillStyle = activeTheme.glow;
+        ctx.lineWidth = 1.5;
+        for (let r = 0; r < 4; r++) {
+          const rowNibble = (mask >>> (r << 2)) & 0xf;
+          if (rowNibble === 0) continue;
+          const gy = engine.ghostY + r - C_VISIBLE_START;
+          if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+          for (let c = 0; c < 4; c++) {
+            if ((rowNibble & (1 << c)) === 0) continue;
+            const gx = engine.activeX + c;
+            ctx.fillRect(gx * CELL_PX + 2, gy * CELL_PX + 2, CELL_PX - 4, CELL_PX - 4);
+            ctx.strokeRect(gx * CELL_PX + 2, gy * CELL_PX + 2, CELL_PX - 4, CELL_PX - 4);
+          }
+        }
+        ctx.restore();
+      }
+
+      // Active piece
+      const lockProgress = engine.getLockProgress();
+      for (let r = 0; r < 4; r++) {
+        const rowNibble = (mask >>> (r << 2)) & 0xf;
+        if (rowNibble === 0) continue;
+        const gy = engine.activeY + r - C_VISIBLE_START;
+        if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+        for (let c = 0; c < 4; c++) {
+          if ((rowNibble & (1 << c)) === 0) continue;
+          const gx = engine.activeX + c;
+          drawFacetedCell(ctx, gx, gy, engine.activeId, lockProgress);
+        }
+      }
+    }
+
+    // Line clear luminous flash sweep
+    if (engine.lineClearFlashTimer > 0) {
+      const alpha = Math.min(0.75, engine.lineClearFlashTimer * 5.2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      for (let r = C_VISIBLE_START; r < C_ROWS; r++) {
+        if (engine.clearingRows[r] === 1) {
+          ctx.fillRect(0, (r - C_VISIBLE_START) * CELL_PX, CANVAS_W, CELL_PX);
+        }
+      }
+    }
+
+    // Zero-GC pooled particle bursts
+    if (engine.activeParticlesCount > 0) {
+      for (let i = 0; i < PARTICLE_POOL_CAP; i++) {
+        const idx = i * PARTICLE_STRIDE;
+        const life = engine.particles[idx + 4];
+        if (life <= 0) continue;
+        const maxLife = engine.particles[idx + 5] || 1;
+        const alpha = Math.max(0, life / maxLife);
+        const px = engine.particles[idx] * CELL_PX;
+        const py = engine.particles[idx + 1] * CELL_PX;
+        const colorId = engine.particles[idx + 6];
+        const theme = COLOR_PIECE_THEMES[colorId];
+        ctx.fillStyle = theme ? theme.light : '#FFFFFF';
+        ctx.globalAlpha = alpha;
+        const size = 2.5 + alpha * 2.5;
+        ctx.fillRect(px - size * 0.5, py - size * 0.5, size, size);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }, []);
+
+  // Reset engine on new run or mode change
+  useEffect(() => {
+    if (runNonce === 0 && engineRef.current?.mode === mode) return;
+    const engine = engineRef.current!;
+    engine.bestScore = loadBestScore(mode);
+    engine.reset(mode, Date.now() ^ ((runNonce + 1) * 2654435761), optionsRef.current.startLevel);
+    heldRef.current.left = false;
+    heldRef.current.right = false;
+    heldRef.current.down = false;
+    heldRef.current.moveDir = 0;
+    heldRef.current.dasTimerMs = 0;
+    heldRef.current.arrTimerMs = 0;
+    heldRef.current.softTimerMs = 0;
+    syncHudIfChanged(true);
+    renderCanvas(true);
+    wakeLoopRef.current();
+  }, [runNonce, mode, syncHudIfChanged, renderCanvas]);
+
+  // Adaptive Low-Power + 60fps FX Simulation Loop
+  //   * Paused / Finished: 0% CPU (no timers or rAF scheduled).
+  //   * Low-Power Idle (no held keys & no active particles/shake/flash): sleeps until exact next wake event.
+  //   * Active Motion / Particle Burst: smooth 60fps rAF until effects settle.
+  useEffect(() => {
+    let rafId = 0;
+    let timeoutId = 0;
+    let lastTime = performance.now();
+    let disposed = false;
+
+    const clearSchedules = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+        timeoutId = 0;
+      }
+    };
+
+    const stepAndSchedule = (now: number) => {
+      if (disposed) return;
+      const engine = engineRef.current!;
+      const activeScreen = screenRef.current;
+      const opts = optionsRef.current;
+
+      if (activeScreen !== 'playing' || engine.gameOver || engine.victory) {
+        renderCanvas(false, now);
+        return; // Sleep completely when paused or finished
+      }
+
+      const rawDt = (now - lastTime) / 1000;
+      lastTime = now;
+      const maxDt = opts.lowPowerMode ? 0.25 : 0.05;
+      const dt = Math.min(Math.max(0, rawDt), maxDt);
+
+      const h = heldRef.current;
+      if (h.moveDir !== 0) {
+        h.dasTimerMs += dt * 1000;
+        if (h.dasTimerMs >= opts.dasMs) {
+          if (opts.arrMs <= 0) {
+            while (engine.move(h.moveDir)) {
+              // instant ARR
+            }
+          } else {
+            h.arrTimerMs += dt * 1000;
+            while (h.arrTimerMs >= opts.arrMs) {
+              h.arrTimerMs -= opts.arrMs;
+              if (engine.move(h.moveDir)) {
+                triggerSound('move');
+              }
+            }
+          }
+        }
+      }
+
+      if (h.down) {
+        const softIntervalMs = Math.max(10, 500 / Math.max(1, opts.sdf));
+        h.softTimerMs += dt * 1000;
+        while (h.softTimerMs >= softIntervalMs) {
+          h.softTimerMs -= softIntervalMs;
+          if (engine.softDropStep()) {
+            triggerSound('softDrop');
+          }
+        }
+      }
+
+      const ev = engine.tick(dt);
+      if (ev !== 'none') {
+        triggerSound(ev);
+      }
+      syncHudIfChanged();
+      renderCanvas(false, now);
+
+      if (engine.gameOver || engine.victory) {
+        const finalSnap = engine.getSnapshot();
+        if (finalSnap.bestScore > loadBestScore(finalSnap.mode)) {
+          saveBestScore(finalSnap.mode, finalSnap.bestScore);
+        }
+        onFinishRef.current(finalSnap);
+        return;
+      }
+
+      const hasHeldMotion = h.moveDir !== 0 || h.down;
+      const needsFastFrame = !opts.lowPowerMode || hasHeldMotion || engine.hasActiveVisualEffects();
+
+      if (needsFastFrame) {
+        rafId = requestAnimationFrame(stepAndSchedule);
+      } else {
+        const wakeDelay = Math.min(200, engine.getNextWakeDelayMs());
+        timeoutId = window.setTimeout(() => {
+          timeoutId = 0;
+          stepAndSchedule(performance.now());
+        }, wakeDelay);
+      }
+    };
+
+    const wake = () => {
+      clearSchedules();
+      lastTime = performance.now();
+      const engine = engineRef.current;
+      if (screenRef.current === 'playing' && engine && !engine.gameOver && !engine.victory) {
+        const h = heldRef.current;
+        const opts = optionsRef.current;
+        const needsFastFrame = !opts.lowPowerMode || h.moveDir !== 0 || h.down || engine.hasActiveVisualEffects();
+        if (needsFastFrame) {
+          rafId = requestAnimationFrame(stepAndSchedule);
+        } else {
+          const wakeDelay = Math.min(200, engine.getNextWakeDelayMs());
+          timeoutId = window.setTimeout(() => {
+            timeoutId = 0;
+            stepAndSchedule(performance.now());
+          }, wakeDelay);
+        }
+      }
+    };
+
+    wakeLoopRef.current = wake;
+    renderCanvas(true);
+    wake();
+
+    return () => {
+      disposed = true;
+      clearSchedules();
+    };
+  }, [screen, options.lowPowerMode, options.gridLines, options.ghostPiece, renderCanvas, syncHudIfChanged, triggerSound]);
+
+  // Keyboard bindings with immediate 0ms render + Low-Power wake
+  useEffect(() => {
+    const clearHeld = () => {
+      heldRef.current.left = false;
+      heldRef.current.right = false;
+      heldRef.current.down = false;
+      heldRef.current.moveDir = 0;
+      heldRef.current.dasTimerMs = 0;
+      heldRef.current.arrTimerMs = 0;
+      heldRef.current.softTimerMs = 0;
+    };
+
+    const immediateUpdate = () => {
+      syncHudIfChanged();
+      renderCanvas(false);
+      wakeLoopRef.current();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (screenRef.current !== 'playing') return;
+      const engine = engineRef.current!;
+      if (engine.gameOver || engine.victory) return;
+
+      const code = e.code;
+      if (
+        code === 'ArrowLeft' ||
+        code === 'ArrowRight' ||
+        code === 'ArrowDown' ||
+        code === 'ArrowUp' ||
+        code === 'Space'
+      ) {
+        e.preventDefault();
+      }
+
+      if (code === 'Escape' || code === 'KeyP') {
+        if (!e.repeat) {
+          clearHeld();
+          onPauseRef.current();
+        }
+        return;
+      }
+
+      if (code === 'ArrowLeft') {
+        if (!e.repeat) {
+          heldRef.current.left = true;
+          heldRef.current.moveDir = -1;
+          heldRef.current.dasTimerMs = 0;
+          heldRef.current.arrTimerMs = 0;
+          if (engine.move(-1)) triggerSound('move');
+          immediateUpdate();
+        }
+        return;
+      }
+
+      if (code === 'ArrowRight') {
+        if (!e.repeat) {
+          heldRef.current.right = true;
+          heldRef.current.moveDir = 1;
+          heldRef.current.dasTimerMs = 0;
+          heldRef.current.arrTimerMs = 0;
+          if (engine.move(1)) triggerSound('move');
+          immediateUpdate();
+        }
+        return;
+      }
+
+      if (code === 'ArrowDown') {
+        if (!e.repeat) {
+          heldRef.current.down = true;
+          heldRef.current.softTimerMs = 0;
+          if (engine.softDropStep()) triggerSound('softDrop');
+          immediateUpdate();
+        }
+        return;
+      }
+
+      if (e.repeat) return;
+
+      if (code === 'ArrowUp' || code === 'KeyX') {
+        if (engine.rotate(1)) {
+          triggerSound('rotate');
+          immediateUpdate();
+        }
+      } else if (code === 'KeyZ' || code === 'ControlLeft' || code === 'ControlRight') {
+        if (engine.rotate(-1)) {
+          triggerSound('rotate');
+          immediateUpdate();
+        }
+      } else if (code === 'KeyA' && optionsRef.current.allow180) {
+        if (engine.rotate(2)) {
+          triggerSound('rotate');
+          immediateUpdate();
+        }
+      } else if (code === 'Space') {
+        const ev = engine.hardDrop();
+        triggerSound(ev);
+        immediateUpdate();
+        if (engine.gameOver || engine.victory) {
+          onFinishRef.current(engine.getSnapshot());
+        }
+      } else if (code === 'KeyC' || code === 'ShiftLeft' || code === 'ShiftRight') {
+        if (engine.hold()) {
+          triggerSound('hold');
+          immediateUpdate();
+        }
+      } else if (code === 'KeyR') {
+        engine.reset(modeRef.current, Date.now() ^ 0x9e3779b9, optionsRef.current.startLevel);
+        clearHeld();
+        syncHudIfChanged(true);
+        renderCanvas(true);
+        wakeLoopRef.current();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'ArrowLeft') {
+        heldRef.current.left = false;
+        heldRef.current.moveDir = heldRef.current.right ? 1 : 0;
+        heldRef.current.dasTimerMs = 0;
+      } else if (e.code === 'ArrowRight') {
+        heldRef.current.right = false;
+        heldRef.current.moveDir = heldRef.current.left ? -1 : 0;
+        heldRef.current.dasTimerMs = 0;
+      } else if (e.code === 'ArrowDown') {
+        heldRef.current.down = false;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.hidden) clearHeld();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearHeld);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', clearHeld);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [renderCanvas, syncHudIfChanged, triggerSound]);
+
+  // Mobile / click actions with synchronous 0ms canvas update
+  const actMove = (dx: -1 | 1) => {
+    if (screen !== 'playing') return;
+    if (engineRef.current?.move(dx)) {
+      triggerSound('move');
+      renderCanvas(false);
+    }
+  };
+  const actRotate = (dir: 1 | -1) => {
+    if (screen !== 'playing') return;
+    if (engineRef.current?.rotate(dir)) {
+      triggerSound('rotate');
+      renderCanvas(false);
+    }
+  };
+  const actHold = () => {
+    if (screen !== 'playing') return;
+    if (engineRef.current?.hold()) {
+      triggerSound('hold');
+      syncHudIfChanged();
+      renderCanvas(false);
+    }
+  };
+  const actHardDrop = () => {
+    if (screen !== 'playing') return;
+    const engine = engineRef.current;
+    if (!engine) return;
+    const ev = engine.hardDrop();
+    triggerSound(ev);
+    syncHudIfChanged();
+    renderCanvas(false);
+    wakeLoopRef.current();
+    if (engine.gameOver || engine.victory) {
+      onFinish(engine.getSnapshot());
+    }
+  };
+  const actSoftDrop = () => {
+    if (screen !== 'playing') return;
+    if (engineRef.current?.softDropStep()) {
+      triggerSound('softDrop');
+      syncHudIfChanged();
+      renderCanvas(false);
+    }
+  };
+  const actRestart = () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.reset(modeRef.current, Date.now() ^ 0x9e3779b9, optionsRef.current.startLevel);
+    syncHudIfChanged(true);
+    renderCanvas(true);
+    wakeLoopRef.current();
+  };
+
+  const modeLabel =
+    hud.mode === 'marathon'
+      ? 'MARATHON'
+      : hud.mode === 'sprint'
+      ? 'SPRINT 40L'
+      : hud.mode === 'ultra'
+      ? 'ULTRA 2:00'
+      : 'ZEN';
+
+  return (
+    <div
+      className="relative flex h-full w-full flex-col items-center justify-center bg-[#0C101B] text-slate-100"
+      data-edition="color"
+      data-low-power={options.lowPowerMode ? 'on' : 'off'}
+    >
+      {/* Subtle geometric obsidian backdrop */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-20"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 20% 20%, #1E293B 0%, transparent 45%), radial-gradient(circle at 80% 80%, #172554 0%, transparent 45%)',
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Top-right compact audio + quick restart */}
+      <div className="pointer-events-auto absolute top-4 right-4 z-10 flex items-center gap-2">
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Restart run"
+          onClick={(e) => {
+            e.currentTarget.blur();
+            actRestart();
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-200 transition-colors hover:border-slate-400 hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-400"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={options.soundEnabled ? 'Mute sound' : 'Unmute sound'}
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onToggleSound();
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 text-slate-200 transition-colors hover:border-slate-400 hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-400"
+        >
+          {options.soundEnabled ? <Volume2 className="h-4 w-4 text-cyan-400" /> : <VolumeX className="h-4 w-4 text-slate-500" />}
+        </button>
+      </div>
+
+      {/* Live callout ribbon positioned above the playfield without covering cells */}
+      <div className="relative z-10 mb-2 flex h-7 items-center justify-center">
+        {hud.lastCallout ? (
+          <div
+            data-testid="color-callout"
+            className="font-display text-sm font-extrabold tracking-wider text-amber-300"
+          >
+            {hud.lastCallout}
+          </div>
+        ) : (
+          <div className="text-xs font-bold tracking-[0.18em] text-slate-400">
+            COLOR · {modeLabel}{options.lowPowerMode ? ' · LOW POWER' : ''}
+          </div>
+        )}
+      </div>
+
+      {/* Sculpted metallic 3-column arcade stage */}
+      <div className="relative z-10 flex items-start justify-center gap-1.5 px-2 sm:gap-5 sm:px-3">
+        {/* Left Wing: HOLD + SCORE / LEVEL / LINES + B2B/COMBO */}
+        <div className="flex w-[72px] shrink-0 flex-col gap-2 sm:w-36 sm:gap-3.5">
+          {/* HOLD metallic well */}
+          <div className="rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:p-2">
+            <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-1.5 sm:text-[11px]">
+              HOLD
+            </div>
+            <div className="flex h-11 items-center justify-center rounded-lg border border-slate-900 bg-[#0D1017] shadow-inner sm:h-14">
+              <div className="scale-75 sm:scale-100">
+                <PiecePreview edition="color" pieceId={hud.holdId} dimmed={!hud.canHold} size="sm" />
+              </div>
+            </div>
+          </div>
+
+          {/* SCORE / LEVEL / LINES + Advanced Telemetry */}
+          <div className="flex flex-col gap-1.5 rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:gap-2.5 sm:p-2.5">
+            <div className="rounded-md bg-[#0D1017] px-1.5 py-1 text-center sm:px-2 sm:py-1.5">
+              <div className="text-[9px] font-bold tracking-[0.14em] text-slate-400 sm:text-[10px]">SCORE</div>
+              <div
+                data-testid="color-score"
+                className="font-telemetry text-sm font-extrabold text-white sm:text-xl"
+              >
+                {hud.score}
+              </div>
+            </div>
+
+            <div className="rounded-md bg-[#0D1017] px-1.5 py-1 text-center sm:px-2 sm:py-1.5">
+              <div className="text-[9px] font-bold tracking-[0.14em] text-slate-400 sm:text-[10px]">
+                {hud.mode === 'ultra' ? 'TIME LEFT' : 'LEVEL'}
+              </div>
+              <div
+                data-testid="color-level"
+                className="font-telemetry text-sm font-extrabold text-cyan-300 sm:text-lg"
+              >
+                {hud.mode === 'ultra' ? formatClock(hud.remainingSec) : hud.level}
+              </div>
+            </div>
+
+            <div className="rounded-md bg-[#0D1017] px-1.5 py-1 text-center sm:px-2 sm:py-1.5">
+              <div className="text-[9px] font-bold tracking-[0.14em] text-slate-400 sm:text-[10px]">
+                {hud.mode === 'sprint' ? 'LINES LEFT' : 'LINES'}
+              </div>
+              <div
+                data-testid="color-lines"
+                className="font-telemetry text-sm font-extrabold text-emerald-300 sm:text-lg"
+              >
+                {hud.mode === 'sprint' ? Math.max(0, 40 - hud.lines) : hud.lines}
+              </div>
+            </div>
+
+            <div className="hidden grid-cols-2 gap-1.5 sm:grid">
+              <div className="rounded bg-[#0D1017] px-1.5 py-1 text-center">
+                <div className="text-[9px] font-bold tracking-wider text-slate-400">COMBO</div>
+                <div className="font-telemetry text-xs font-bold text-amber-300">
+                  {hud.combo > 0 ? `${hud.combo}x` : '0'}
+                </div>
+              </div>
+              <div className="rounded bg-[#0D1017] px-1.5 py-1 text-center">
+                <div className="text-[9px] font-bold tracking-wider text-slate-400">B2B</div>
+                <div className={`font-telemetry text-xs font-bold ${hud.b2b ? 'text-purple-300' : 'text-slate-500'}`}>
+                  {hud.b2b ? 'ACTIVE' : 'OFF'}
+                </div>
+              </div>
+            </div>
+
+            <div className="hidden items-center justify-between px-1 text-[11px] text-slate-300 sm:flex">
+              <span>PPS</span>
+              <span className="font-telemetry font-bold">{hud.pps.toFixed(1)}</span>
+            </div>
+            <div className="hidden items-center justify-between px-1 text-[11px] text-slate-300 sm:flex">
+              <span>T-SPINS</span>
+              <span className="font-telemetry font-bold text-purple-300">{hud.tSpins}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Center Metallic Beveled Playfield */}
+        <div className="shrink-0 rounded-xl border-2 border-slate-300/75 bg-gradient-to-b from-slate-500 via-slate-700 to-slate-800 p-1 shadow-2xl sm:rounded-2xl sm:p-2">
+          <div className="overflow-hidden rounded-lg border-2 border-slate-950 bg-[#0D1017]">
+            <canvas
+              ref={canvasRef}
+              width={CANVAS_W}
+              height={CANVAS_H}
+              data-testid="color-canvas"
+              className="block h-[380px] w-[190px] sm:h-[560px] sm:w-[280px]"
+            />
+          </div>
+        </div>
+
+        {/* Right Wing: 5-Piece NEXT Queue + Bottom-Right Pause */}
+        <div className="flex w-[72px] shrink-0 flex-col justify-between self-stretch sm:w-36">
+          <div className="rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:p-2.5">
+            <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-2 sm:text-[11px]">
+              NEXT
+            </div>
+            <div className="flex flex-col items-center gap-0.5 rounded-lg border border-slate-900 bg-[#0D1017] py-1 shadow-inner sm:gap-1.5 sm:py-2">
+              {hud.nextIds.map((pid, idx) => (
+                <div
+                  key={idx}
+                  className={`scale-75 sm:scale-100 ${
+                    idx === 0 ? 'opacity-100' : idx < 3 ? 'opacity-90' : 'hidden opacity-75 sm:block'
+                  }`}
+                >
+                  <PiecePreview edition="color" pieceId={pid} size={idx === 0 ? 'md' : 'sm'} />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end gap-2 pt-3">
+            <div className="hidden w-full rounded-lg border border-slate-700/80 bg-slate-900/90 px-2.5 py-1.5 text-center sm:block">
+              <div className="text-[10px] font-bold tracking-wider text-slate-400">BEST</div>
+              <div className="font-telemetry text-xs font-bold text-slate-200">{hud.bestScore}</div>
+            </div>
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Pause game"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onPause();
+              }}
+              className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-slate-400/70 bg-slate-700 text-white shadow-md transition-colors hover:border-white hover:bg-slate-600 focus-visible:outline-2 focus-visible:outline-cyan-400 sm:h-12 sm:w-12"
+            >
+              <Pause className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile Touch Controls */}
+      <div className="relative z-10 mt-3 flex w-full max-w-md items-center justify-between gap-2 px-4 md:hidden">
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => actMove(-1)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 text-sm font-bold text-white active:bg-slate-600"
+            aria-label="Move left"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            onClick={actSoftDrop}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 text-sm font-bold text-white active:bg-slate-600"
+            aria-label="Soft drop"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={() => actMove(1)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 text-sm font-bold text-white active:bg-slate-600"
+            aria-label="Move right"
+          >
+            →
+          </button>
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={actHold}
+            className="flex h-11 items-center justify-center rounded-lg border border-slate-600 bg-slate-800 px-3 text-xs font-bold text-slate-200 active:bg-slate-600"
+          >
+            HOLD
+          </button>
+          <button
+            type="button"
+            onClick={() => actRotate(1)}
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyan-500/60 bg-slate-800 text-sm font-bold text-cyan-300 active:bg-slate-600"
+            aria-label="Rotate clockwise"
+          >
+            ↻
+          </button>
+          <button
+            type="button"
+            onClick={actHardDrop}
+            className="flex h-11 items-center justify-center rounded-lg bg-emerald-600 px-3 text-xs font-extrabold text-white active:bg-emerald-500"
+          >
+            DROP
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
