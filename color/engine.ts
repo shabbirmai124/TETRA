@@ -40,66 +40,66 @@ export const COLOR_PIECE_THEMES: Record<number, PieceTheme> = {
   [ColorPieceId.I]: {
     id: 1,
     name: 'I',
-    fill: '#00D8F5',
-    light: '#A5F3FC',
-    dark: '#087EA4',
-    glow: 'rgba(0, 216, 245, 0.36)',
+    fill: '#00E5FF', // Diamond Cyan
+    light: '#C4FAFF',
+    dark: '#0077B6',
+    glow: 'rgba(0, 229, 255, 0.38)',
   },
   [ColorPieceId.O]: {
     id: 2,
     name: 'O',
-    fill: '#F59E0B',
-    light: '#FDE68A',
-    dark: '#92400E',
-    glow: 'rgba(245, 158, 11, 0.38)',
+    fill: '#FFD600', // Radiant Gold Diamond
+    light: '#FFF9B0',
+    dark: '#B87A00',
+    glow: 'rgba(255, 214, 0, 0.42)',
   },
   [ColorPieceId.T]: {
     id: 3,
     name: 'T',
-    fill: '#A855F7',
-    light: '#E9D5FF',
-    dark: '#581C87',
-    glow: 'rgba(168, 85, 247, 0.38)',
+    fill: '#B429FF', // Electric Amethyst Diamond
+    light: '#F3C6FF',
+    dark: '#5B1199',
+    glow: 'rgba(180, 41, 255, 0.4)',
   },
   [ColorPieceId.S]: {
     id: 4,
     name: 'S',
-    fill: '#10B981',
-    light: '#6EE7B7',
-    dark: '#065F46',
-    glow: 'rgba(16, 185, 129, 0.36)',
+    fill: '#18E03C', // Neon Emerald Diamond
+    light: '#C6FFD0',
+    dark: '#067A22',
+    glow: 'rgba(24, 224, 60, 0.38)',
   },
   [ColorPieceId.Z]: {
     id: 5,
     name: 'Z',
-    fill: '#F43F5E',
-    light: '#FDA4AF',
-    dark: '#9F1239',
-    glow: 'rgba(244, 63, 94, 0.38)',
+    fill: '#FF1E42', // Crimson Ruby Diamond
+    light: '#FFC2CC',
+    dark: '#8C0920',
+    glow: 'rgba(255, 30, 66, 0.4)',
   },
   [ColorPieceId.J]: {
     id: 6,
     name: 'J',
-    fill: '#2563EB',
-    light: '#93C5FD',
-    dark: '#1E3A8A',
-    glow: 'rgba(37, 99, 235, 0.38)',
+    fill: '#1D6BFF', // Royal Sapphire Diamond
+    light: '#BBD6FF',
+    dark: '#0C2F8A',
+    glow: 'rgba(29, 107, 255, 0.4)',
   },
   [ColorPieceId.L]: {
     id: 7,
     name: 'L',
-    fill: '#FB923C',
-    light: '#FED7AA',
-    dark: '#9A3412',
-    glow: 'rgba(251, 146, 60, 0.38)',
+    fill: '#FF7A00', // Tangerine Flame Diamond
+    light: '#FFE0B5',
+    dark: '#993D00',
+    glow: 'rgba(255, 122, 0, 0.4)',
   },
   8: {
     id: 8,
     name: 'SUPER',
-    fill: '#FACC15',
+    fill: '#FFE600', // Solar Prismatic Diamond
     light: '#FFFFFF',
-    dark: '#B45309',
-    glow: 'rgba(253, 224, 71, 0.45)',
+    dark: '#C46800',
+    glow: 'rgba(255, 230, 0, 0.5)',
   },
 };
 
@@ -232,6 +232,7 @@ export type ColorStepEvent =
   | 'quad'
   | 'tspin'
   | 'blast'
+  | 'overdrive'
   | 'levelUp'
   | 'victory'
   | 'gameOver';
@@ -252,6 +253,11 @@ export interface ColorSnapshot {
   superBlasts: number;
   isSuperActive: boolean;
   isNextSuper: boolean;
+  superProgress: number;
+  feverCharge: number;
+  overdriveTimer: number;
+  isOverdrive: boolean;
+  rank: string;
   piecesPlaced: number;
   elapsedSec: number;
   remainingSec: number;
@@ -305,11 +311,13 @@ export class ColorEngine {
   public holdIsSuper = false;
   public canHold = true;
 
-  // Super Block reward & blast state
+  // Super Block reward, Overdrive 2x Fever, & blast state
   public isNextSuper = false;
   public isSuperActive = false;
   public superBlasts = 0;
   private nextSuperAtLines = 8;
+  public feverCharge = 0;
+  public overdriveTimer = 0;
 
   // Telemetry & scoring
   public score = 0;
@@ -398,6 +406,8 @@ export class ColorEngine {
     this.isSuperActive = false;
     this.superBlasts = 0;
     this.nextSuperAtLines = 8;
+    this.feverCharge = 0;
+    this.overdriveTimer = 0;
     this.score = 0;
     this.level = mode === 'zen' ? 1 : this.startLevel;
     this.lines = 0;
@@ -779,6 +789,11 @@ export class ColorEngine {
     if (this.calloutTimer > 0) {
       this.calloutTimer = Math.max(0, this.calloutTimer - dt);
     }
+    if (this.overdriveTimer > 0) {
+      this.overdriveTimer = Math.max(0, this.overdriveTimer - dt);
+      this.feverCharge = Math.round((this.overdriveTimer / 12) * 100);
+      if (this.overdriveTimer === 0) this.boardRevision++;
+    }
     let alive = 0;
     for (let i = 0; i < PARTICLE_POOL_CAP; i++) {
       const idx = i * PARTICLE_STRIDE;
@@ -982,6 +997,20 @@ export class ColorEngine {
     }
 
     let levelChanged = false;
+    let overdriveTriggered = false;
+
+    // Check top danger zone before clear for Clutch Save bonus
+    let inDangerZone = false;
+    for (let y = C_VISIBLE_START; y <= C_VISIBLE_START + 4 && !inDangerZone; y++) {
+      const rowOffset = y * C_COLS;
+      for (let x = 0; x < C_COLS; x++) {
+        if (this.board[rowOffset + x] !== 0) {
+          inDangerZone = true;
+          break;
+        }
+      }
+    }
+
     if (cleared > 0) {
       this.combo++;
       if (isDifficult) {
@@ -1001,6 +1030,11 @@ export class ColorEngine {
         calloutParts.push(`${this.combo} COMBO`);
       }
 
+      const clutchBonus = inDangerZone ? 250 : 0;
+      if (clutchBonus > 0) {
+        calloutParts.push('CLUTCH!');
+      }
+
       let allClearBonus = 0;
       if (this.isBoardEmpty()) {
         this.allClears++;
@@ -1009,8 +1043,22 @@ export class ColorEngine {
         this.isNextSuper = true;
       }
 
-      this.score += (baseScore + allClearBonus) * this.level + comboBonus;
+      const scoreMul = this.overdriveTimer > 0 ? 2 : 1;
+      this.score += ((baseScore + allClearBonus + clutchBonus) * this.level + comboBonus) * scoreMul;
       if (this.score > this.bestScore) this.bestScore = this.score;
+
+      if (this.overdriveTimer > 0) {
+        this.overdriveTimer = Math.min(12, this.overdriveTimer + cleared * 1.1);
+        this.feverCharge = Math.round((this.overdriveTimer / 12) * 100);
+      } else {
+        const gain =
+          cleared * 18 + Math.max(0, this.combo) * 8 + (inDangerZone ? 14 : 0) + (isDifficult ? 16 : 0);
+        this.feverCharge = Math.min(100, this.feverCharge + gain);
+        if (this.feverCharge >= 100) {
+          this.overdriveTimer = 12;
+          overdriveTriggered = true;
+        }
+      }
 
       this.lines += cleared;
       if (this.mode === 'marathon' || this.mode === 'ultra') {
@@ -1033,7 +1081,8 @@ export class ColorEngine {
     } else {
       this.combo = -1;
       if (baseScore > 0) {
-        this.score += baseScore * this.level;
+        const scoreMul = this.overdriveTimer > 0 ? 2 : 1;
+        this.score += baseScore * this.level * scoreMul;
         if (this.score > this.bestScore) this.bestScore = this.score;
       }
     }
@@ -1060,9 +1109,12 @@ export class ColorEngine {
       this.hitstopTimer = Math.max(this.hitstopTimer, 0.055);
       this.shakeTrauma = Math.min(1, this.shakeTrauma + 0.65);
       this.spawnBlastParticles(impactCx, this.lastImpactY);
-      this.score += (blastedCells * 100 + 250) * this.level;
+      const blastMul = this.overdriveTimer > 0 ? 2 : 1;
+      this.score += (blastedCells * 100 + 250) * this.level * blastMul;
       if (this.score > this.bestScore) this.bestScore = this.score;
       calloutParts.unshift(blastedCells > 0 ? `SUPER BLAST! +${blastedCells}` : 'SUPER BLAST!');
+    } else if (overdriveTriggered) {
+      calloutParts.push('2X OVERDRIVE!');
     } else if (this.isNextSuper && cleared > 0) {
       calloutParts.push('SUPER READY!');
     }
@@ -1095,6 +1147,7 @@ export class ColorEngine {
     if (wasSuper) return 'blast';
     if (tSpin !== 'none' && cleared > 0) return 'tspin';
     if (cleared === 4) return 'quad';
+    if (overdriveTriggered) return 'overdrive';
     if (cleared === 3) return 'line3';
     if (cleared === 2) return 'line2';
     if (cleared === 1) return 'line1';
@@ -1104,6 +1157,16 @@ export class ColorEngine {
 
   public getLockProgress(): number {
     return this.isGrounded ? Math.min(1, this.lockTimer / 0.5) : 0;
+  }
+
+  public getRank(): string {
+    if (this.score >= 100000) return 'X';
+    if (this.score >= 50000) return 'SS';
+    if (this.score >= 25000) return 'S';
+    if (this.score >= 12000) return 'A';
+    if (this.score >= 5000) return 'B';
+    if (this.score >= 1500) return 'C';
+    return 'D';
   }
 
   public getMemoryFootprintBytes(): number {
@@ -1140,6 +1203,11 @@ export class ColorEngine {
       superBlasts: this.superBlasts,
       isSuperActive: this.isSuperActive,
       isNextSuper: this.isNextSuper,
+      superProgress: this.lines % 8,
+      feverCharge: this.feverCharge,
+      overdriveTimer: this.overdriveTimer,
+      isOverdrive: this.overdriveTimer > 0,
+      rank: this.getRank(),
       piecesPlaced: this.piecesPlaced,
       elapsedSec: this.elapsedSec,
       remainingSec: this.remainingSec,

@@ -153,6 +153,7 @@ export type NoColorStepEvent =
   | 'line3'
   | 'quad'
   | 'blast'
+  | 'overdrive'
   | 'levelUp'
   | 'gameOver';
 
@@ -169,6 +170,11 @@ export interface NoColorSnapshot {
   superBlasts: number;
   isSuperActive: boolean;
   isNextSuper: boolean;
+  superProgress: number;
+  feverCharge: number;
+  overdriveTimer: number;
+  isOverdrive: boolean;
+  rank: string;
   piecesPlaced: number;
   lastCallout: string;
   gameOver: boolean;
@@ -223,12 +229,14 @@ export class NoColorEngine {
   private lockResets = 0;
   private isGrounded = false;
 
-  // Super Block reward & blast state (scalar primitives, 0 extra TypedArray heap)
+  // Super Block reward, Overdrive 2x Fever, & blast state (scalar primitives, 0 extra TypedArray heap)
   public isNextSuper = false;
   public isSuperActive = false;
   public holdIsSuper = false;
   public superBlasts = 0;
   private nextSuperAtLines = 8;
+  public feverCharge = 0; // 0..100
+  public overdriveTimer = 0; // seconds remaining in 2x OVERDRIVE
 
   // Line flash & impact FX state (consumed by monochrome spark/beam renderer)
   public clearFlashTimer = 0;
@@ -302,6 +310,8 @@ export class NoColorEngine {
     this.holdIsSuper = false;
     this.superBlasts = 0;
     this.nextSuperAtLines = 8;
+    this.feverCharge = 0;
+    this.overdriveTimer = 0;
     this.lastImpactX = 4.5;
     this.lastImpactY = 18;
     this.lastImpactKind = 0;
@@ -558,6 +568,14 @@ export class NoColorEngine {
       }
     }
 
+    if (this.overdriveTimer > 0) {
+      this.overdriveTimer = Math.max(0, this.overdriveTimer - dt);
+      this.feverCharge = Math.round((this.overdriveTimer / 12) * 100);
+      if (this.overdriveTimer === 0) {
+        this.boardRevision++;
+      }
+    }
+
     const interval = this.getFallInterval();
     this.gravityTimer += dt;
 
@@ -652,7 +670,18 @@ export class NoColorEngine {
     }
 
     let levelChanged = false;
+    let overdriveTriggered = false;
     let callout = '';
+
+    // Check top danger zone before clear for Clutch Save bonus
+    let inDangerZone = false;
+    for (let r = NC_VISIBLE_START; r <= NC_VISIBLE_START + 4; r++) {
+      if (this.board[r] !== 0) {
+        inDangerZone = true;
+        break;
+      }
+    }
+
     if (cleared > 0) {
       this.clearFlashRowsMask = flashMask;
       this.clearFlashTimer = 0.24;
@@ -683,6 +712,11 @@ export class NoColorEngine {
         callout = `${callout} · ${this.combo} COMBO`;
       }
 
+      const clutchBonus = inDangerZone ? 250 : 0;
+      if (clutchBonus > 0) {
+        callout = `${callout} · CLUTCH!`;
+      }
+
       let allClearBonus = 0;
       if (this.isBoardEmpty()) {
         this.allClears++;
@@ -691,8 +725,22 @@ export class NoColorEngine {
         this.isNextSuper = true;
       }
 
-      this.score += (basePoints + allClearBonus) * this.level + comboBonus;
+      // Overdrive 2x Score Rush multiplier + Fever charge
+      const scoreMul = this.overdriveTimer > 0 ? 2 : 1;
+      this.score += ((basePoints + allClearBonus + clutchBonus) * this.level + comboBonus) * scoreMul;
       if (this.score > this.bestScore) this.bestScore = this.score;
+
+      if (this.overdriveTimer > 0) {
+        this.overdriveTimer = Math.min(12, this.overdriveTimer + cleared * 1.1);
+        this.feverCharge = Math.round((this.overdriveTimer / 12) * 100);
+      } else {
+        const gain = cleared * 18 + Math.max(0, this.combo) * 8 + (inDangerZone ? 14 : 0) + (cleared === 4 ? 16 : 0);
+        this.feverCharge = Math.min(100, this.feverCharge + gain);
+        if (this.feverCharge >= 100) {
+          this.overdriveTimer = 12;
+          overdriveTriggered = true;
+        }
+      }
 
       const prevLevel = this.level;
       this.lines += cleared;
@@ -732,9 +780,12 @@ export class NoColorEngine {
       this.blastFlashTimer = 0.28;
       this.lastImpactKind = 2;
       this.impactNonce++;
-      this.score += (blastedCells * 100 + 250) * this.level;
+      const blastMul = this.overdriveTimer > 0 ? 2 : 1;
+      this.score += (blastedCells * 100 + 250) * this.level * blastMul;
       if (this.score > this.bestScore) this.bestScore = this.score;
       callout = callout ? `SUPER BLAST! · ${callout}` : blastedCells > 0 ? `SUPER BLAST! +${blastedCells}` : 'SUPER BLAST!';
+    } else if (overdriveTriggered) {
+      callout = `${callout} · 2X OVERDRIVE!`;
     } else if (cleared > 0 && this.isNextSuper) {
       callout = `${callout} · SUPER READY!`;
     }
@@ -753,6 +804,7 @@ export class NoColorEngine {
 
     if (wasSuper) return 'blast';
     if (cleared === 4) return 'quad';
+    if (overdriveTriggered) return 'overdrive';
     if (cleared === 3) return 'line3';
     if (cleared === 2) return 'line2';
     if (cleared === 1) return 'line1';
@@ -777,6 +829,16 @@ export class NoColorEngine {
     );
   }
 
+  public getRank(): string {
+    if (this.score >= 100000) return 'X';
+    if (this.score >= 50000) return 'SS';
+    if (this.score >= 25000) return 'S';
+    if (this.score >= 12000) return 'A';
+    if (this.score >= 5000) return 'B';
+    if (this.score >= 1500) return 'C';
+    return 'D';
+  }
+
   public getSnapshot(): NoColorSnapshot {
     const nextIds: [number, number, number] = [0, 0, 0];
     this.getNextIds(nextIds);
@@ -793,6 +855,11 @@ export class NoColorEngine {
       superBlasts: this.superBlasts,
       isSuperActive: this.isSuperActive,
       isNextSuper: this.isNextSuper,
+      superProgress: this.lines % 8,
+      feverCharge: this.feverCharge,
+      overdriveTimer: this.overdriveTimer,
+      isOverdrive: this.overdriveTimer > 0,
+      rank: this.getRank(),
       piecesPlaced: this.piecesPlaced,
       lastCallout: this.calloutTimer > 0 ? this.lastCallout : '',
       gameOver: this.gameOver,

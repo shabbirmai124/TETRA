@@ -113,7 +113,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     if (!engine) return;
     const snap = engine.getSnapshot();
     const clockBucket = Math.floor(snap.elapsedSec * 5); // 5Hz HUD clock refresh
-    const sig = `${snap.mode}|${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.holdIsSuper}|${snap.canHold}|${snap.isSuperActive}|${snap.isNextSuper}|${snap.superBlasts}|${snap.nextIds.join(',')}|${snap.calloutId}|${snap.lastCallout}|${clockBucket}|${snap.gameOver}|${snap.victory}`;
+    const sig = `${snap.mode}|${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.holdIsSuper}|${snap.canHold}|${snap.isSuperActive}|${snap.isNextSuper}|${snap.superProgress}|${snap.superBlasts}|${snap.feverCharge}|${snap.isOverdrive}|${snap.rank}|${snap.nextIds.join(',')}|${snap.calloutId}|${snap.lastCallout}|${clockBucket}|${snap.gameOver}|${snap.victory}`;
     if (force || sig !== lastHudSigRef.current) {
       lastHudSigRef.current = sig;
       if (snap.bestScore > loadBestScore(snap.mode)) {
@@ -125,7 +125,8 @@ export const ColorGame: React.FC<ColorGameProps> = ({
 
   const triggerSound = useCallback((ev: ColorStepEvent) => {
     if (!optionsRef.current.soundEnabled || ev === 'none' || ev === 'lock') return;
-    soundSynth.play(ev);
+    const combo = Math.max(0, engineRef.current?.combo ?? 0);
+    soundSynth.play(ev, combo);
   }, []);
 
   // Pre-bake 8 3D-cut Crystal Prism block & ghost sprites once into 224x28 atlases (7 pieces + slot 8 Super Diamond)
@@ -148,75 +149,98 @@ export const ColorGame: React.FC<ColorGameProps> = ({
       const x = (id - 1) * s;
 
       if (bctx) {
-        // Deep obsidian housing border
-        bctx.fillStyle = '#070A12';
+        const inset = 7;
+        // Deep obsidian outer housing
+        bctx.fillStyle = '#05080F';
         bctx.fillRect(x, 0, s, s);
-        // Core crystal fill
+        // Radiant diamond base
         bctx.fillStyle = theme.fill;
         bctx.fillRect(x + 1, 1, s - 2, s - 2);
 
-        // Diagonal upper-left bright crystal prism plane
-        bctx.fillStyle = 'rgba(255,255,255,0.22)';
-        bctx.beginPath();
-        bctx.moveTo(x + 1, 1);
-        bctx.lineTo(x + s - 1, 1);
-        bctx.lineTo(x + 1, s - 1);
-        bctx.closePath();
-        bctx.fill();
-
-        // Top specular bevel trapezoid
+        // Top cut diamond facet (bright specular)
         bctx.fillStyle = theme.light;
         bctx.beginPath();
         bctx.moveTo(x + 1, 1);
         bctx.lineTo(x + s - 1, 1);
-        bctx.lineTo(x + s - 6, 6);
-        bctx.lineTo(x + 6, 6);
+        bctx.lineTo(x + s - inset, inset);
+        bctx.lineTo(x + inset, inset);
         bctx.closePath();
         bctx.fill();
 
-        // Left bright crystal rim
-        bctx.fillStyle = 'rgba(255,255,255,0.42)';
+        // Top white gleam edge
+        bctx.fillStyle = 'rgba(255,255,255,0.62)';
+        bctx.fillRect(x + 2, 1, s - 4, 2);
+
+        // Left cut diamond facet (light catch)
+        bctx.fillStyle = theme.light;
+        bctx.globalAlpha = 0.72;
         bctx.beginPath();
         bctx.moveTo(x + 1, 1);
-        bctx.lineTo(x + 6, 6);
-        bctx.lineTo(x + 6, s - 6);
+        bctx.lineTo(x + inset, inset);
+        bctx.lineTo(x + inset, s - inset);
         bctx.lineTo(x + 1, s - 1);
         bctx.closePath();
         bctx.fill();
+        bctx.globalAlpha = 1;
 
-        // Bottom & right deep cut facet
+        // Right cut diamond facet (mid-dark depth)
+        bctx.fillStyle = theme.dark;
+        bctx.globalAlpha = 0.65;
+        bctx.beginPath();
+        bctx.moveTo(x + s - 1, 1);
+        bctx.lineTo(x + s - 1, s - 1);
+        bctx.lineTo(x + s - inset, s - inset);
+        bctx.lineTo(x + s - inset, inset);
+        bctx.closePath();
+        bctx.fill();
+        bctx.globalAlpha = 1;
+
+        // Bottom cut diamond facet (deep shadow)
         bctx.fillStyle = theme.dark;
         bctx.beginPath();
         bctx.moveTo(x + 1, s - 1);
         bctx.lineTo(x + s - 1, s - 1);
-        bctx.lineTo(x + s - 1, 1);
-        bctx.lineTo(x + s - 6, 6);
-        bctx.lineTo(x + s - 6, s - 6);
-        bctx.lineTo(x + 6, s - 6);
+        bctx.lineTo(x + s - inset, s - inset);
+        bctx.lineTo(x + inset, s - inset);
         bctx.closePath();
         bctx.fill();
 
-        // Inner faceted jewel crown & diagonal specular glint
-        bctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        // Crisp diagonal diamond corner cut ribs
+        bctx.strokeStyle = 'rgba(255,255,255,0.45)';
         bctx.lineWidth = 1;
-        bctx.strokeRect(x + 6.5, 6.5, s - 13, s - 13);
-        bctx.fillStyle = 'rgba(255,255,255,0.34)';
         bctx.beginPath();
-        bctx.moveTo(x + 7, 7);
-        bctx.lineTo(x + s - 7, 7);
-        bctx.lineTo(x + 7, s - 7);
+        bctx.moveTo(x + 1, 1);
+        bctx.lineTo(x + inset, inset);
+        bctx.moveTo(x + s - 1, 1);
+        bctx.lineTo(x + s - inset, inset);
+        bctx.moveTo(x + 1, s - 1);
+        bctx.lineTo(x + inset, s - inset);
+        bctx.moveTo(x + s - 1, s - 1);
+        bctx.lineTo(x + s - inset, s - inset);
+        bctx.stroke();
+
+        // Center diamond jewel table + crystal glint triangle
+        bctx.fillStyle = theme.fill;
+        bctx.fillRect(x + inset, inset, s - inset * 2, s - inset * 2);
+        bctx.fillStyle = 'rgba(255,255,255,0.38)';
+        bctx.beginPath();
+        bctx.moveTo(x + inset, inset);
+        bctx.lineTo(x + s - inset, inset);
+        bctx.lineTo(x + inset, s - inset);
         bctx.closePath();
         bctx.fill();
+        bctx.strokeStyle = 'rgba(255,255,255,0.72)';
+        bctx.strokeRect(x + inset + 0.5, inset + 0.5, s - inset * 2 - 1, s - inset * 2 - 1);
 
         // Top-left crystal star glint (extra bold 4-point diamond for Slot 8 Super Block)
         bctx.fillStyle = '#FFFFFF';
-        bctx.fillRect(x + 3, 3, 3, 3);
+        bctx.fillRect(x + 2, 2, 3, 3);
         if (id === 8) {
           bctx.beginPath();
-          bctx.moveTo(x + s / 2, 7);
-          bctx.lineTo(x + s - 7, s / 2);
-          bctx.lineTo(x + s / 2, s - 7);
-          bctx.lineTo(x + 7, s / 2);
+          bctx.moveTo(x + s / 2, 6);
+          bctx.lineTo(x + s - 6, s / 2);
+          bctx.lineTo(x + s / 2, s - 6);
+          bctx.lineTo(x + 6, s / 2);
           bctx.closePath();
           bctx.fill();
         }
@@ -968,14 +992,31 @@ export const ColorGame: React.FC<ColorGameProps> = ({
               <span>T-SPINS</span>
               <span className="font-telemetry font-bold text-purple-300">{hud.tSpins}</span>
             </div>
-            {(hud.isSuperActive || hud.isNextSuper || hud.superBlasts > 0) && (
-              <div className="hidden items-center justify-between px-1 text-[11px] text-amber-300 sm:flex">
-                <span>{hud.isSuperActive ? 'SUPER' : hud.isNextSuper ? 'READY' : 'BLASTS'}</span>
-                <span className="font-telemetry font-bold">
-                  {hud.isSuperActive ? '5x5' : hud.isNextSuper ? 'NEXT' : hud.superBlasts}
+            <div className="hidden items-center justify-between px-1 text-[11px] text-slate-300 sm:flex">
+              <span>RANK</span>
+              <span className="font-telemetry font-extrabold text-cyan-300">{hud.rank}</span>
+            </div>
+            <div className="hidden items-center justify-between px-1 text-[11px] text-amber-300 sm:flex">
+              <span>{hud.isSuperActive ? 'SUPER' : hud.isNextSuper ? 'READY' : 'SUPER'}</span>
+              <span className="font-telemetry font-bold">
+                {hud.isSuperActive ? '5x5!' : hud.isNextSuper ? 'NEXT!' : `${hud.superProgress}/8`}
+              </span>
+            </div>
+            {/* Overdrive 2X Rush Gauge */}
+            <div className="hidden flex-col gap-1 rounded bg-[#0D1017] px-1.5 py-1 sm:flex">
+              <div className="flex items-center justify-between text-[9px] font-bold tracking-wider">
+                <span className={hud.isOverdrive ? 'text-amber-300' : 'text-slate-400'}>
+                  {hud.isOverdrive ? '2X OVERDRIVE' : 'OVERDRIVE'}
                 </span>
+                <span className="font-telemetry text-white">{hud.feverCharge}%</span>
               </div>
-            )}
+              <div className="h-1.5 w-full overflow-hidden bg-slate-800">
+                <div
+                  className={`h-full ${hud.isOverdrive ? 'bg-amber-400' : 'bg-cyan-400'}`}
+                  style={{ width: `${Math.min(100, Math.max(0, hud.feverCharge))}%` }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 

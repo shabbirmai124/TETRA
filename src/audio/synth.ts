@@ -11,8 +11,9 @@ export type SoundEvent =
   | 'line3'
   | 'quad'
   | 'tspin'
-  | 'levelUp'
   | 'blast'
+  | 'overdrive'
+  | 'levelUp'
   | 'gameOver'
   | 'victory';
 
@@ -49,12 +50,13 @@ class SoundSynth {
     this.volume = Math.max(0, Math.min(1, vol));
   }
 
-  public play(event: SoundEvent): void {
+  public play(event: SoundEvent, combo = 0): void {
     const ctx = this.ensureContext();
     if (!ctx || this.volume <= 0.001) return;
 
     const now = ctx.currentTime;
     const masterGain = this.volume;
+    const pitchMul = combo > 0 ? Math.pow(1.059463, Math.min(10, combo)) : 1;
 
     switch (event) {
       case 'move':
@@ -74,26 +76,26 @@ class SoundSynth {
         this.tone(ctx, 392, 523.25, 0.06, 'sine', 0.2 * masterGain, now);
         break;
       case 'line1':
-        this.tone(ctx, 523.25, 659.25, 0.14, 'triangle', 0.28 * masterGain, now);
+        this.tone(ctx, 523.25 * pitchMul, 659.25 * pitchMul, 0.14, 'triangle', 0.28 * masterGain, now);
         break;
       case 'line2':
-        this.tone(ctx, 523.25, 659.25, 0.11, 'triangle', 0.26 * masterGain, now);
-        this.tone(ctx, 659.25, 783.99, 0.14, 'triangle', 0.28 * masterGain, now + 0.06);
+        this.tone(ctx, 523.25 * pitchMul, 659.25 * pitchMul, 0.11, 'triangle', 0.26 * masterGain, now);
+        this.tone(ctx, 659.25 * pitchMul, 783.99 * pitchMul, 0.14, 'triangle', 0.28 * masterGain, now + 0.06);
         break;
       case 'line3':
-        this.tone(ctx, 523.25, 659.25, 0.1, 'triangle', 0.26 * masterGain, now);
-        this.tone(ctx, 659.25, 783.99, 0.1, 'triangle', 0.28 * masterGain, now + 0.05);
-        this.tone(ctx, 783.99, 987.77, 0.16, 'triangle', 0.3 * masterGain, now + 0.1);
+        this.tone(ctx, 523.25 * pitchMul, 659.25 * pitchMul, 0.1, 'triangle', 0.26 * masterGain, now);
+        this.tone(ctx, 659.25 * pitchMul, 783.99 * pitchMul, 0.1, 'triangle', 0.28 * masterGain, now + 0.05);
+        this.tone(ctx, 783.99 * pitchMul, 987.77 * pitchMul, 0.16, 'triangle', 0.3 * masterGain, now + 0.1);
         break;
       case 'quad':
-        this.tone(ctx, 523.25, 523.25, 0.09, 'square', 0.2 * masterGain, now);
-        this.tone(ctx, 659.25, 659.25, 0.09, 'square', 0.2 * masterGain, now + 0.06);
-        this.tone(ctx, 783.99, 783.99, 0.09, 'square', 0.22 * masterGain, now + 0.12);
-        this.tone(ctx, 1046.5, 1046.5, 0.26, 'triangle', 0.34 * masterGain, now + 0.18);
+        this.tone(ctx, 523.25 * pitchMul, 523.25 * pitchMul, 0.09, 'square', 0.2 * masterGain, now);
+        this.tone(ctx, 659.25 * pitchMul, 659.25 * pitchMul, 0.09, 'square', 0.2 * masterGain, now + 0.06);
+        this.tone(ctx, 783.99 * pitchMul, 783.99 * pitchMul, 0.09, 'square', 0.22 * masterGain, now + 0.12);
+        this.tone(ctx, 1046.5 * pitchMul, 1046.5 * pitchMul, 0.26, 'triangle', 0.34 * masterGain, now + 0.18);
         break;
       case 'tspin':
-        this.tone(ctx, 440, 880, 0.12, 'sawtooth', 0.18 * masterGain, now);
-        this.tone(ctx, 659.25, 1318.5, 0.18, 'triangle', 0.26 * masterGain, now + 0.07);
+        this.tone(ctx, 440 * pitchMul, 880 * pitchMul, 0.12, 'sawtooth', 0.18 * masterGain, now);
+        this.tone(ctx, 659.25 * pitchMul, 1318.5 * pitchMul, 0.18, 'triangle', 0.26 * masterGain, now + 0.07);
         break;
       case 'levelUp':
         this.tone(ctx, 587.33, 587.33, 0.08, 'triangle', 0.25 * masterGain, now);
@@ -104,6 +106,11 @@ class SoundSynth {
         this.tone(ctx, 130, 34, 0.26, 'sawtooth', 0.34 * masterGain, now);
         this.tone(ctx, 220, 48, 0.22, 'triangle', 0.36 * masterGain, now);
         this.tone(ctx, 520, 1320, 0.18, 'sine', 0.24 * masterGain, now + 0.03);
+        break;
+      case 'overdrive':
+        this.tone(ctx, 523.25, 1046.5, 0.14, 'triangle', 0.28 * masterGain, now);
+        this.tone(ctx, 659.25, 1318.5, 0.16, 'triangle', 0.28 * masterGain, now + 0.05);
+        this.tone(ctx, 783.99, 1567.98, 0.22, 'sine', 0.32 * masterGain, now + 0.1);
         break;
       case 'victory':
         this.tone(ctx, 523.25, 523.25, 0.1, 'triangle', 0.28 * masterGain, now);

@@ -5,6 +5,7 @@ import {
   ColorPieceId,
   C_COLS,
   C_ROWS,
+  C_VISIBLE_START,
 } from './engine';
 
 test('ColorEngine initializes cleanly with 5-piece preview and zeroed board', () => {
@@ -180,3 +181,52 @@ test('ColorEngine rewards Super Block, preserves holdIsSuper, triggers 5x5 Blast
   engine.tick(0.016);
   assert.ok(engine.activeParticlesCount > 0);
 });
+
+test('ColorEngine triggers 2x Overdrive Rush, Clutch Save, and progressive Rank tiers', () => {
+  const engine = new ColorEngine('marathon', 909);
+  assert.equal(engine.getRank(), 'D');
+
+  // Danger block near ceiling triggers Clutch Save (+250) + fills feverCharge over 100
+  engine.board[C_VISIBLE_START * C_COLS + 0] = ColorPieceId.L;
+  for (let x = 0; x < C_COLS; x++) {
+    if (x < 3 || x > 6) engine.board[(C_ROWS - 1) * C_COLS + x] = ColorPieceId.I;
+  }
+  engine.feverCharge = 85;
+  engine.activeId = ColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+
+  const ev = engine.hardDrop();
+  assert.equal(ev, 'overdrive');
+  assert.equal(engine.overdriveTimer, 12);
+  assert.equal(engine.getSnapshot().isOverdrive, true);
+
+  // Subsequent single line clear gets 2x Overdrive multiplier
+  const prevScore = engine.score;
+  engine.board.fill(0);
+  for (let x = 0; x < C_COLS; x++) {
+    if (x < 3 || x > 6) engine.board[(C_ROWS - 1) * C_COLS + x] = ColorPieceId.T;
+  }
+  engine.board[(C_ROWS - 2) * C_COLS + 9] = ColorPieceId.O;
+  engine.activeId = ColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  assert.equal(engine.hardDrop(), 'line1');
+  // 20 rows hardDrop (40 pts) + (100 single + 50 combo) * 2x = 340
+  assert.equal(engine.score - prevScore, 340);
+  assert.equal(engine.getSnapshot().superProgress, 2);
+
+  engine.score = 100500;
+  assert.equal(engine.getRank(), 'X');
+
+  engine.tick(13);
+  assert.equal(engine.overdriveTimer, 0);
+  assert.equal(engine.getSnapshot().isOverdrive, false);
+});
+

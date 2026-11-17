@@ -247,8 +247,8 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             </div>
             <p className={`border-t pt-2 text-xs ${isMono ? 'border-neutral-800 text-neutral-400' : 'border-slate-700 text-slate-400'}`}>
               {isMono
-                ? 'Chain Quads for Back-to-Back 1.5x multipliers, Combos, All Clears, and Super Block 5x5 Blasts every Quad or 8 lines.'
-                : 'Chain Quads or T-Spins for Back-to-Back 1.5x multipliers, Combos, All Clears, and Super Block 5x5 Blasts.'}
+                ? 'Chain Quads for B2B 1.5x, fill Fever for 2x Overdrive Rush, snag Clutch Saves near the top, and earn Super Block 5x5 Blasts every Quad or 8 lines.'
+                : 'Chain Quads or T-Spins for B2B 1.5x, trigger 2x Overdrive Rush, score Clutch Saves near the top, and earn Super Diamond 5x5 Blasts.'}
             </p>
           </div>
         )}
@@ -323,13 +323,16 @@ export const EndModal: React.FC<EndModalProps> = ({
         {isMono && noColorResult && (
           <div className="mb-5 flex justify-between border-y border-neutral-800 py-2.5 text-xs text-neutral-300">
             <span>
+              Rank: <strong className="font-telemetry text-white">{noColorResult.rank}</strong>
+            </span>
+            <span>
               Quads: <strong className="font-telemetry text-white">{noColorResult.quads}</strong>
             </span>
             <span>
               Blasts: <strong className="font-telemetry text-white">{noColorResult.superBlasts}</strong>
             </span>
             <span>
-              All Clear: <strong className="font-telemetry text-white">{noColorResult.allClears}</strong>
+              Clear: <strong className="font-telemetry text-white">{noColorResult.allClears}</strong>
             </span>
           </div>
         )}
@@ -337,10 +340,10 @@ export const EndModal: React.FC<EndModalProps> = ({
         {!isMono && colorResult && (
           <div className="mb-5 flex justify-between border-y border-slate-700 py-2.5 text-xs text-slate-300">
             <span>
-              T-Spins: <strong className="font-telemetry text-white">{colorResult.tSpins}</strong>
+              Rank: <strong className="font-telemetry text-amber-300">{colorResult.rank}</strong>
             </span>
             <span>
-              Quads: <strong className="font-telemetry text-white">{colorResult.quads}</strong>
+              T-Spins: <strong className="font-telemetry text-white">{colorResult.tSpins}</strong>
             </span>
             <span>
               Blasts: <strong className="font-telemetry text-white">{colorResult.superBlasts}</strong>

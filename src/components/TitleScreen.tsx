@@ -81,26 +81,90 @@ const AmbientBoardPreview: React.FC<{ edition: Edition }> = ({ edition }) => {
       } else {
         const t = COLOR_PIECE_THEMES[id];
         if (!t) return;
-        ctx.fillStyle = '#070A12';
+        const inset = 6;
+        ctx.fillStyle = '#05080F';
         ctx.fillRect(x, y, cell, cell);
         ctx.fillStyle = t.fill;
         ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+
+        // Top cut diamond facet
+        ctx.fillStyle = t.light;
         ctx.beginPath();
         ctx.moveTo(x + 1, y + 1);
         ctx.lineTo(x + cell - 1, y + 1);
+        ctx.lineTo(x + cell - inset, y + inset);
+        ctx.lineTo(x + inset, y + inset);
+        ctx.closePath();
+        ctx.fill();
+
+        // Top white gleam
+        ctx.fillStyle = 'rgba(255,255,255,0.62)';
+        ctx.fillRect(x + 2, y + 1, cell - 4, 1.5);
+
+        // Left cut diamond facet
+        ctx.fillStyle = t.light;
+        ctx.globalAlpha = 0.72;
+        ctx.beginPath();
+        ctx.moveTo(x + 1, y + 1);
+        ctx.lineTo(x + inset, y + inset);
+        ctx.lineTo(x + inset, y + cell - inset);
         ctx.lineTo(x + 1, y + cell - 1);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = t.light;
-        ctx.fillRect(x + 1, y + 1, cell - 2, 3);
-        ctx.fillRect(x + 1, y + 1, 3, cell - 2);
+        ctx.globalAlpha = 1;
+
+        // Right cut diamond facet
         ctx.fillStyle = t.dark;
-        ctx.fillRect(x + 1, y + cell - 4, cell - 2, 3);
-        ctx.fillRect(x + cell - 4, y + 1, 3, cell - 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.globalAlpha = 0.65;
+        ctx.beginPath();
+        ctx.moveTo(x + cell - 1, y + 1);
+        ctx.lineTo(x + cell - 1, y + cell - 1);
+        ctx.lineTo(x + cell - inset, y + cell - inset);
+        ctx.lineTo(x + cell - inset, y + inset);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Bottom cut diamond facet
+        ctx.fillStyle = t.dark;
+        ctx.beginPath();
+        ctx.moveTo(x + 1, y + cell - 1);
+        ctx.lineTo(x + cell - 1, y + cell - 1);
+        ctx.lineTo(x + cell - inset, y + cell - inset);
+        ctx.lineTo(x + inset, y + cell - inset);
+        ctx.closePath();
+        ctx.fill();
+
+        // Diagonal corner ribs
+        ctx.strokeStyle = 'rgba(255,255,255,0.45)';
         ctx.lineWidth = 1;
-        ctx.strokeRect(x + 5.5, y + 5.5, cell - 11, cell - 11);
+        ctx.beginPath();
+        ctx.moveTo(x + 1, y + 1);
+        ctx.lineTo(x + inset, y + inset);
+        ctx.moveTo(x + cell - 1, y + 1);
+        ctx.lineTo(x + cell - inset, y + inset);
+        ctx.moveTo(x + 1, y + cell - 1);
+        ctx.lineTo(x + inset, y + cell - inset);
+        ctx.moveTo(x + cell - 1, y + cell - 1);
+        ctx.lineTo(x + cell - inset, y + cell - inset);
+        ctx.stroke();
+
+        // Center jewel table + crystal glint triangle
+        ctx.fillStyle = t.fill;
+        ctx.fillRect(x + inset, y + inset, cell - inset * 2, cell - inset * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.38)';
+        ctx.beginPath();
+        ctx.moveTo(x + inset, y + inset);
+        ctx.lineTo(x + cell - inset, y + inset);
+        ctx.lineTo(x + inset, y + cell - inset);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+        ctx.strokeRect(x + inset + 0.5, y + inset + 0.5, cell - inset * 2 - 1, cell - inset * 2 - 1);
+
+        // Top-left crystal sparkle
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(x + 2, y + 2, 2.5, 2.5);
       }
     };
 
@@ -238,13 +302,30 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               role="img"
               aria-label="TETRA"
             >
-              {/* Geometric tetromino emblem */}
+              {/* Geometric cut-diamond tetromino emblem */}
               <g transform="translate(0, 6)">
-                <rect x="0" y="0" width="16" height="16" fill={isMono ? '#FFFFFF' : '#06B6D4'} />
-                <rect x="18" y="0" width="16" height="16" fill={isMono ? '#FFFFFF' : '#A855F7'} />
-                <rect x="36" y="0" width="16" height="16" fill={isMono ? '#FFFFFF' : '#EAB308'} />
-                <rect x="18" y="18" width="16" height="16" fill={isMono ? '#FFFFFF' : '#22C55E'} />
-                <rect x="18" y="36" width="16" height="16" fill={isMono ? '#FFFFFF' : '#EF4444'} />
+                {[
+                  { x: 0, y: 0, fill: '#00E5FF', light: '#C4FAFF', dark: '#0077B6' },
+                  { x: 18, y: 0, fill: '#B429FF', light: '#F3C6FF', dark: '#5B1199' },
+                  { x: 36, y: 0, fill: '#FFD600', light: '#FFF9B0', dark: '#B87A00' },
+                  { x: 18, y: 18, fill: '#18E03C', light: '#C6FFD0', dark: '#067A22' },
+                  { x: 18, y: 36, fill: '#FF1E42', light: '#FFC2CC', dark: '#8C0920' },
+                ].map((b, idx) =>
+                  isMono ? (
+                    <g key={idx}>
+                      <rect x={b.x} y={b.y} width="16" height="16" fill="#171717" stroke="#FFFFFF" strokeWidth="1.2" />
+                      <rect x={b.x + 4} y={b.y + 4} width="8" height="8" fill="none" stroke="#D4D4D4" strokeWidth="0.9" />
+                    </g>
+                  ) : (
+                    <g key={idx}>
+                      <rect x={b.x} y={b.y} width="16" height="16" fill={b.fill} stroke="#05080F" strokeWidth="0.8" />
+                      <polygon points={`${b.x},${b.y} ${b.x + 16},${b.y} ${b.x + 12},${b.y + 4} ${b.x + 4},${b.y + 4}`} fill={b.light} />
+                      <polygon points={`${b.x},${b.y + 16} ${b.x + 16},${b.y + 16} ${b.x + 12},${b.y + 12} ${b.x + 4},${b.y + 12}`} fill={b.dark} />
+                      <rect x={b.x + 4} y={b.y + 4} width="8" height="8" fill={b.fill} stroke="rgba(255,255,255,0.7)" strokeWidth="0.8" />
+                      <rect x={b.x + 1.5} y={b.y + 1.5} width="2" height="2" fill="#FFFFFF" />
+                    </g>
+                  ),
+                )}
               </g>
               <text
                 x="68"

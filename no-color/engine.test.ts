@@ -138,9 +138,9 @@ test('NoColorEngine awards Super Block, preserves in Hold, and triggers 5x5 Blas
   assert.equal(engine.hold(), true);
   assert.equal(engine.isSuperActive, true);
 
-  // Place nearby blocks cleanly on an otherwise empty board to verify 5x5 blast
+  // Place nearby blocks in cols 3..7 cleanly on an otherwise empty board to verify 5x5 blast around O-piece (center x=5)
   engine.board.fill(0);
-  engine.board[NC_ROWS - 1] = 0b0000111111;
+  engine.board[NC_ROWS - 1] = 0b0011111000;
   engine.activeId = NoColorPieceId.O;
   engine.activeRot = 0;
   engine.activeX = 3;
@@ -150,6 +150,50 @@ test('NoColorEngine awards Super Block, preserves in Hold, and triggers 5x5 Blas
   const ev = engine.hardDrop();
   assert.equal(ev, 'blast');
   assert.equal(engine.superBlasts, 1);
-  assert.equal(engine.board[NC_ROWS - 1] & 0b0001111100, 0);
+  assert.equal(engine.board[NC_ROWS - 1] & 0b0011111000, 0);
   assert.ok(engine.getMemoryFootprintBytes() < 512);
 });
+
+test('NoColorEngine charges Overdrive 2x Rush, awards Clutch Save, and tracks Rank', () => {
+  const engine = new NoColorEngine(654);
+  assert.equal(engine.getRank(), 'D');
+
+  // Place a cell in top danger row (row 4) to earn Clutch Save (+250) on single clear
+  engine.board[4] = 1;
+  engine.board[NC_ROWS - 1] = NC_FULL_ROW & ~(0b1111 << 3);
+  engine.feverCharge = 85;
+
+  engine.activeId = NoColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  const ev = engine.hardDrop();
+  assert.equal(ev, 'overdrive');
+  assert.equal(engine.overdriveTimer, 12);
+  assert.ok(engine.score >= 350);
+
+  // Next line clear during active Overdrive earns 2x score multiplier
+  const prevScore = engine.score;
+  engine.board.fill(0);
+  engine.board[NC_ROWS - 1] = NC_FULL_ROW & ~(0b1111 << 3);
+  engine.board[NC_ROWS - 2] = 1 << 9; // avoid all clear so score is strictly single(100) + combo(50) * 2
+  engine.activeId = NoColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  const ev2 = engine.hardDrop();
+  assert.equal(ev2, 'line1');
+  // 18 rows hardDrop (36 pts) + (100 + 50 combo) * 2x overdrive = 336
+  assert.equal(engine.score - prevScore, 336);
+  assert.equal(engine.getSnapshot().superProgress, 2);
+
+  // Verify Overdrive timer expires cleanly
+  engine.tick(13);
+  assert.equal(engine.overdriveTimer, 0);
+  assert.equal(engine.getSnapshot().isOverdrive, false);
+});
+

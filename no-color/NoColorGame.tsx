@@ -153,7 +153,7 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
     const engine = engineRef.current;
     if (!engine) return;
     const snap = engine.getSnapshot();
-    const sig = `${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.holdIsSuper}|${snap.canHold}|${snap.isSuperActive}|${snap.isNextSuper}|${snap.superBlasts}|${snap.nextIds.join(',')}|${snap.lastCallout}|${snap.gameOver}`;
+    const sig = `${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.holdIsSuper}|${snap.canHold}|${snap.isSuperActive}|${snap.isNextSuper}|${snap.superProgress}|${snap.superBlasts}|${snap.feverCharge}|${snap.isOverdrive}|${snap.rank}|${snap.nextIds.join(',')}|${snap.lastCallout}|${snap.gameOver}`;
     if (force || sig !== lastHudSigRef.current) {
       lastHudSigRef.current = sig;
       if (snap.bestScore > loadBestScore()) {
@@ -176,10 +176,12 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
       ev === 'line3' ||
       ev === 'quad' ||
       ev === 'blast' ||
+      ev === 'overdrive' ||
       ev === 'levelUp' ||
       ev === 'gameOver'
     ) {
-      soundSynth.play(ev);
+      const combo = Math.max(0, engineRef.current?.combo ?? 0);
+      soundSynth.play(ev, combo);
     }
   }, []);
 
@@ -991,16 +993,34 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
               </div>
             </div>
 
-            {(hud.isSuperActive || hud.isNextSuper || hud.superBlasts > 0) && (
-              <div className="hidden items-center justify-between border-t border-neutral-800 pt-1.5 text-[10px] sm:flex">
-                <span className="font-bold tracking-wider text-neutral-400">
-                  {hud.isSuperActive ? 'SUPER' : hud.isNextSuper ? 'READY' : 'BLASTS'}
+            <div className="hidden items-center justify-between border-t border-neutral-800 pt-1.5 text-[10px] sm:flex">
+              <span className="font-bold tracking-wider text-neutral-400">RANK</span>
+              <span className="font-telemetry font-extrabold text-white">{hud.rank}</span>
+            </div>
+
+            <div className="hidden items-center justify-between text-[10px] sm:flex">
+              <span className="font-bold tracking-wider text-neutral-400">
+                {hud.isSuperActive ? 'SUPER' : hud.isNextSuper ? 'READY' : 'SUPER'}
+              </span>
+              <span className="font-telemetry font-bold text-white">
+                {hud.isSuperActive ? '5x5!' : hud.isNextSuper ? 'NEXT!' : `${hud.superProgress}/8`}
+              </span>
+            </div>
+
+            <div className="hidden flex-col gap-1 border-t border-neutral-800 pt-1.5 sm:flex">
+              <div className="flex items-center justify-between text-[9px] font-bold tracking-wider">
+                <span className={hud.isOverdrive ? 'text-white' : 'text-neutral-500'}>
+                  {hud.isOverdrive ? '2X RUSH' : 'FEVER'}
                 </span>
-                <span className="font-telemetry font-bold text-white">
-                  {hud.isSuperActive ? '5x5' : hud.isNextSuper ? 'NEXT' : hud.superBlasts}
-                </span>
+                <span className="font-telemetry text-white">{hud.feverCharge}%</span>
               </div>
-            )}
+              <div className="h-1.5 w-full border border-neutral-700 bg-black">
+                <div
+                  className="h-full bg-white"
+                  style={{ width: `${Math.min(100, Math.max(0, hud.feverCharge))}%` }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
