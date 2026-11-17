@@ -1,11 +1,11 @@
 # TETRA — No Color & Color Editions
 
-![TETRA — No Color and Color Editions Banner](src/assets/images/tetra_readme_banner_1794887580705.jpg)
+![TETRA — Title Screen with 3D Cut Diamonds](src/assets/images/tetra_title_showcase.png)
 
 > **Created by:** **Md Shabbir Mia** ([shabbirmia520@gmail.com](mailto:shabbirmia520@gmail.com))  
 > **License:** [MIT License](./LICENSE)
 
-**TETRA** is an original, high-efficiency falling-block puzzle suite written in strict **TypeScript** with **TypedArrays**, **Canvas 2D**, and **procedural Web Audio**. It ships as **two individual, standalone game engines and folders**—one minimalist white-and-black engine engineered for minimal RAM and battery draw, and one full-color competitive engine packing complete modern mechanics, particle bursts, and four distinct game modes.
+**TETRA** is an original, high-efficiency falling-block puzzle suite written in strict **TypeScript** with **TypedArrays**, **Canvas 2D**, and **procedural Web Audio**. It ships as **two individual, standalone game engines and folders**—one minimalist white-and-black engine engineered for minimal RAM and battery draw, and one full-color competitive engine packing 3D cut-diamond visuals, fiery blast sparks, Overdrive `2×` Rush, and four distinct game modes.
 
 ---
 
@@ -13,8 +13,8 @@
 
 | **No Color Edition (`no-color/`)** | **Color Advanced Edition (`color/`)** |
 | :---: | :---: |
-| ![TETRA No Color Edition Showcase](src/assets/images/tetra_nocolor_showcase_1794891715954.jpg) | ![TETRA Color Edition Showcase](src/assets/images/tetra_color_showcase_1794891720472.jpg) |
-| *44-byte bitboard · Pure `#000000` / `#FFFFFF` · Event-driven idle sleep* | *Faceted jewel bevels · T-Spins · Pooled particle bursts · 4 Game Modes* |
+| ![TETRA No Color Edition Showcase](src/assets/images/tetra_nocolor_showcase.png) | ![TETRA Color Edition Showcase](src/assets/images/tetra_color_showcase.png) |
+| *44-byte bitboard · Architectural wireframe · Static cave backdrop · Overdrive 2× & Super Blast* | *3D Cut Diamond facets · Exact `#00E5FF`–`#FF7A00` gems · T-Spins · Fire Sparks · 4 Modes* |
 
 ---
 
@@ -28,18 +28,18 @@ Engineered from the ground up for ultra-low memory consumption, minimal battery/
   - Pre-bakes `28×28` architectural monochrome wireframe, Super crosshair, and dashed ghost sprites plus a static matrix grid onto offscreen canvases once so every frame uses pure integer `drawImage()` blits.
   - Frames the monochrome playfield with a static layered rocky cave & hill cliff backdrop (zero runtime CPU/animation overhead).
   - Computes the exact millisecond delay until the next gravity step, lock timer, or callout expiry via `getNextWakeDelayMs()`, sleeping with `setTimeout` instead of spinning a 60 Hz `requestAnimationFrame` loop while idle, waking briefly only during active sparks/flashes and dropping to **0% CPU** when paused or on Game Over.
-- **Complete Classic & Modern Ruleset + Super Block Blast**: 7-bag randomizer (`Uint8Array`), Hold piece (with `holdIsSuper` preservation), 3-piece Next queue, dashed Ghost piece, SRS + 180° rotation (`A`), Back-to-Back Quads (1.5×), Combo chains, All Clear bonuses, **Super Block Rewards** (earned on Quad, All Clear, or every 8 lines) triggering a **5×5 Shockwave Blast** (`+100 × cells + 250 × level`), monochrome laser-beam/starburst line-clear FX, and a 48-spark `Float32Array` burst pool.
+- **Complete Classic & Modern Ruleset + Super Block, Overdrive & Clutch Save**: 7-bag randomizer (`Uint8Array`), Hold piece (with `holdIsSuper` preservation), 3-piece Next queue, dashed Ghost piece, SRS + 180° rotation (`A`), Back-to-Back Quads (1.5×), Combo chains with rising musical scale tones, All Clear bonuses, **Clutch Save** (`+250 × level` when clearing near top danger rows), **Overdrive `2×` Score Rush** (fills `feverCharge 0–100%` for a 12 s `2×` multiplier), **Rank (`D → C → B → A → S → SS → X`)**, **Super Block Rewards** (`X/8` line tracker, B2B Quad, or All Clear) detonating a **5×5 Shockwave Blast** (`+100 × cells + 250 × level`), monochrome laser-beam/starburst line-clear FX, and a 48-spark `Float32Array` burst pool.
 
 ### 2. `color/` — Advanced Modern Color Edition (`color/engine.ts` + `color/ColorGame.tsx`)
-Built for high-speed competitive play, crisp crystal visuals, fiery impact FX, and retro-class CPU efficiency:
+Built for high-speed competitive play, crisp 3D diamond visuals, fiery impact FX, and retro-class CPU efficiency:
 - **240-Byte Compact Matrix (`Uint8Array(240)`)**: Stores the 10×24 playfield (rows `0..3` spawn buffer + rows `4..23` visible matrix) using 1 byte per cell.
-- **Pre-Baked `224×28` 3D Crystal Prism Sprite Atlases**: Pre-renders all 7 jewel blocks (`#00D8F5` Cyan, `#F59E0B` Amber-Gold, `#A855F7` Amethyst, `#10B981` Emerald, `#F43F5E` Ruby, `#2563EB` Cobalt, `#FB923C` Topaz) plus Slot 8 (`#FACC15` Solar Super Diamond) with diagonal 3D-cut specular facets and ghost outlines once at startup.
+- **Pre-Baked `224×28` 3D Cut-Diamond Sprite Atlases**: Pre-renders all 7 jewel blocks (`#00E5FF` Cyan, `#FFD600` Gold, `#B429FF` Amethyst, `#18E03C` Emerald, `#FF1E42` Ruby, `#1D6BFF` Sapphire, `#FF7A00` Tangerine) plus Slot 8 (`#FFE600` Solar Super Diamond) with 4-way pyramidal cut bevels, diagonal corner ribs, center jewel table, specular crystal glints, and ghost outlines once at startup.
 - **Zero-GC Fire-Spark & Starburst FX (`Float32Array(72 × 7)`)**: Fixed 2,016-byte ring buffer drives streaking fiery white-gold-orange embers (`colorId === 0`) and crystal shards alongside horizontal laser-beam sweeps, radial starburst flares, shockwave rings, 45–55 ms hitstop, and decaying `trauma²` camera shake.
-- **Super Block Reward & 5×5 Blast**: Clearing a Quad, T-Spin line clear, All Clear, or reaching every 8 lines charges the next piece as a Solar Super Diamond (`holdIsSuper` preserved on Hold swaps) that detonates a 5×5 Blast on landing.
+- **Super Diamond 5×5 Blast, Overdrive `2×` Rush, Clutch Save & Live Rank**: Clearing lines charges Overdrive (`0–100%` → 12 s **`2×` Score Rush**), top-danger clears award **Clutch Save** (`+250 × level`), live performance grades from **`D → X`**, and hitting a B2B difficult clear, All Clear, or every **8 lines (`X/8`)** rewards a Solar Super Diamond (`holdIsSuper` preserved on Hold swaps) that triggers a 5×5 Blast on impact.
 - **Adaptive Low-Power Scheduler & Flat Hardware UI**: Uses an opaque `{ alpha: false }` canvas, blits the cached offscreen matrix grid, eliminates CSS blur shadows and multi-stop gradients for software rasterizers, and exits 60 FPS `requestAnimationFrame` into event-driven `getNextWakeDelayMs()` sleep whenever particles/shake settle and no movement keys are held.
 - **Full Super Rotation System (SRS) + 180°**: Complete CW, CCW, and 180° rotation with JLSTZ, I, and 180° kick tables.
 - **T-Spin & Mini T-Spin Detection**: Implements the 3-corner T-slot rule around the T-piece center with front-corner + 5th kick verification (`T-Spin Zero`, `Mini`, `Single`, `Double`, `Triple`).
-- **Back-to-Back (B2B), Combo (Ren) & All Clear**: 1.5× multiplier on consecutive Quads or T-Spin line clears, escalating `50 × combo × level` chains, and Perfect Clear bonuses (`+1800` / `+3200 × level`).
+- **Back-to-Back (B2B), Combo (Ren) & All Clear**: 1.5× multiplier on consecutive Quads or T-Spin line clears, escalating `50 × combo × level` chains with rising semitone Web Audio feedback, and Perfect Clear bonuses (`+1800` / `+3200 × level`).
 - **4 Distinct Game Modes**:
   - **Marathon** — Classic climb through accelerating gravity curves toward 150 lines (Start Level `1–15`).
   - **Sprint 40L** — Clear 40 lines as fast as possible with live **PPS** (Pieces Per Second) and elapsed timer.
@@ -71,9 +71,11 @@ Built for high-speed competitive play, crisp crystal visuals, fiery impact FX, a
 | **Quad (4-Line Clear)** | `800` | Yes (`1.5×` = `1,200`) + Super Charge |
 | **Mini T-Spin (0 / 1 Line)** *(Color)* | `100` · `200` | Yes on line clear (`1.5×`) + Super Charge |
 | **T-Spin (0 / 1 / 2 / 3 Lines)** *(Color)* | `400` · `800` · `1,200` · `1,600` | Yes on line clear (`1.5×`) + Super Charge |
-| **Super Block 5×5 Blast** | `+100 × blasted cells + 250` | Earned on Quad / T-Spin / All Clear / every 8 lines |
-| **Combo Chain (Ren)** | `+50 × combo × level` | Stacks with B2B |
-| **All Clear (Perfect Clear)** | `+1,800` (1–3L) / `+3,200` (Quad) | Stacks with B2B & Combo + Super Charge |
+| **Super Block 5×5 Blast** | `+100 × blasted cells + 250` | Earned on B2B difficult clear / All Clear / every 8 lines |
+| **Clutch Save** | `+250` | Stacks on line clears when top danger rows are occupied |
+| **Overdrive `2×` Rush** | **`2×` Total Clear Score** | 12 s surge once `feverCharge` hits `100%` (extends on clears) |
+| **Combo Chain (Ren)** | `+50 × combo × level` | Stacks with B2B & Overdrive |
+| **All Clear (Perfect Clear)** | `+1,800` (1–3L) / `+3,200` (Quad) | Stacks with B2B, Combo & Overdrive + Super Charge |
 
 ### Gravity, Lock Delay & Handling Specs
 - **Gravity Curve**: `interval(level) = max(0.015s, (0.8 - (L - 1) × 0.007)^(L - 1))` where `L = min(19, level - 1)` (constant `0.9s` in Zen mode).
