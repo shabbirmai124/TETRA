@@ -103,9 +103,10 @@ export const ColorGame: React.FC<ColorGameProps> = ({
   });
 
   const lastHudSigRef = useRef('');
-  const lastRenderSigRef = useRef('');
+  const lastRenderStateRef = useRef({ rev: -1, lockBucket: -1, optsBits: -1 });
   const wakeLoopRef = useRef<() => void>(() => {});
   const gridCacheRef = useRef<{ canvas: HTMLCanvasElement; gridLines: boolean } | null>(null);
+  const atlasCacheRef = useRef<{ blocks: HTMLCanvasElement; ghosts: HTMLCanvasElement } | null>(null);
 
   const syncHudIfChanged = useCallback((force = false) => {
     const engine = engineRef.current;
@@ -127,71 +128,78 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     soundSynth.play(ev);
   }, []);
 
-  // Draw faceted gem block
-  const drawFacetedCell = (
-    ctx: CanvasRenderingContext2D,
-    gx: number,
-    gy: number,
-    pieceId: number,
-    lockPulse: number,
-  ) => {
-    const theme = COLOR_PIECE_THEMES[pieceId];
-    if (!theme) return;
-    const x = gx * CELL_PX;
-    const y = gy * CELL_PX;
+  // Pre-bake all 7 faceted jewel block & ghost sprites once into 196x28 sprite sheets (zero per-frame path tessellation)
+  const ensureSpriteAtlas = () => {
+    if (atlasCacheRef.current) return atlasCacheRef.current;
+    const blocks = document.createElement('canvas');
+    blocks.width = CELL_PX * 7;
+    blocks.height = CELL_PX;
+    const bctx = blocks.getContext('2d');
+
+    const ghosts = document.createElement('canvas');
+    ghosts.width = CELL_PX * 7;
+    ghosts.height = CELL_PX;
+    const gctx = ghosts.getContext('2d');
+
     const s = CELL_PX;
+    for (let id = 1; id <= 7; id++) {
+      const theme = COLOR_PIECE_THEMES[id];
+      if (!theme) continue;
+      const x = (id - 1) * s;
 
-    // Outer dark mortar border
-    ctx.fillStyle = '#0B0F17';
-    ctx.fillRect(x, y, s, s);
+      if (bctx) {
+        bctx.fillStyle = '#0B0F17';
+        bctx.fillRect(x, 0, s, s);
+        bctx.fillStyle = theme.fill;
+        bctx.fillRect(x + 1, 1, s - 2, s - 2);
 
-    // Core fill
-    ctx.fillStyle = theme.fill;
-    ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+        bctx.fillStyle = theme.light;
+        bctx.beginPath();
+        bctx.moveTo(x + 1, 1);
+        bctx.lineTo(x + s - 1, 1);
+        bctx.lineTo(x + s - 5, 5);
+        bctx.lineTo(x + 5, 5);
+        bctx.closePath();
+        bctx.fill();
 
-    // Top bevel triangle
-    ctx.fillStyle = theme.light;
-    ctx.beginPath();
-    ctx.moveTo(x + 1, y + 1);
-    ctx.lineTo(x + s - 1, y + 1);
-    ctx.lineTo(x + s - 5, y + 5);
-    ctx.lineTo(x + 5, y + 5);
-    ctx.closePath();
-    ctx.fill();
+        bctx.fillStyle = 'rgba(255,255,255,0.28)';
+        bctx.beginPath();
+        bctx.moveTo(x + 1, 1);
+        bctx.lineTo(x + 5, 5);
+        bctx.lineTo(x + 5, s - 5);
+        bctx.lineTo(x + 1, s - 1);
+        bctx.closePath();
+        bctx.fill();
 
-    // Left bevel
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.beginPath();
-    ctx.moveTo(x + 1, y + 1);
-    ctx.lineTo(x + 5, y + 5);
-    ctx.lineTo(x + 5, y + s - 5);
-    ctx.lineTo(x + 1, y + s - 1);
-    ctx.closePath();
-    ctx.fill();
+        bctx.fillStyle = theme.dark;
+        bctx.beginPath();
+        bctx.moveTo(x + 1, s - 1);
+        bctx.lineTo(x + s - 1, s - 1);
+        bctx.lineTo(x + s - 1, 1);
+        bctx.lineTo(x + s - 5, 5);
+        bctx.lineTo(x + s - 5, s - 5);
+        bctx.lineTo(x + 5, s - 5);
+        bctx.closePath();
+        bctx.fill();
 
-    // Bottom & right deep bevel
-    ctx.fillStyle = theme.dark;
-    ctx.beginPath();
-    ctx.moveTo(x + 1, y + s - 1);
-    ctx.lineTo(x + s - 1, y + s - 1);
-    ctx.lineTo(x + s - 1, y + 1);
-    ctx.lineTo(x + s - 5, y + 5);
-    ctx.lineTo(x + s - 5, y + s - 5);
-    ctx.lineTo(x + 5, y + s - 5);
-    ctx.closePath();
-    ctx.fill();
+        bctx.fillStyle = 'rgba(255,255,255,0.16)';
+        bctx.fillRect(x + 6, 6, s - 12, s - 12);
+      }
 
-    // Specular inner facet
-    ctx.fillStyle = 'rgba(255,255,255,0.16)';
-    ctx.fillRect(x + 6, y + 6, s - 12, s - 12);
-
-    if (lockPulse > 0.05) {
-      ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(0.45, lockPulse * 0.4)})`;
-      ctx.fillRect(x + 1, y + 1, s - 2, s - 2);
+      if (gctx) {
+        gctx.fillStyle = theme.glow;
+        gctx.fillRect(x + 2, 2, s - 4, s - 4);
+        gctx.strokeStyle = theme.light;
+        gctx.lineWidth = 1;
+        gctx.strokeRect(x + 2.5, 2.5, s - 5, s - 5);
+      }
     }
+
+    atlasCacheRef.current = { blocks, ghosts };
+    return atlasCacheRef.current;
   };
 
-  // Dirty-checked Canvas2D render with offscreen cached matrix grid + opaque { alpha: false } backbuffer
+  // Zero-allocation dirty-checked Canvas2D sprite-sheet renderer
   const renderCanvas = useCallback((force = false, now = performance.now()) => {
     const canvas = canvasRef.current;
     const engine = engineRef.current;
@@ -206,20 +214,32 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     const opts = optionsRef.current;
     const hasFx = engine.hasActiveVisualEffects();
     const lockBucket = Math.floor(engine.getLockProgress() * 4);
-    const sig = hasFx
-      ? `fx:${Math.round(now)}`
-      : `${engine.boardRevision}|${lockBucket}|${opts.gridLines ? 1 : 0}|${opts.ghostPiece ? 1 : 0}|${engine.gameOver ? 1 : 0}|${engine.victory ? 1 : 0}`;
-    if (!force && sig === lastRenderSigRef.current) {
+    const optsBits =
+      (opts.gridLines ? 1 : 0) |
+      (opts.ghostPiece ? 2 : 0) |
+      (engine.gameOver ? 4 : 0) |
+      (engine.victory ? 8 : 0);
+    const prev = lastRenderStateRef.current;
+
+    if (
+      !force &&
+      !hasFx &&
+      prev.rev === engine.boardRevision &&
+      prev.lockBucket === lockBucket &&
+      prev.optsBits === optsBits
+    ) {
       return;
     }
-    lastRenderSigRef.current = sig;
+    prev.rev = engine.boardRevision;
+    prev.lockBucket = lockBucket;
+    prev.optsBits = optsBits;
 
-    ctx.save();
-    // Decaying camera shake (trauma^2)
-    if (engine.shakeTrauma > 0.005) {
+    const hasShake = engine.shakeTrauma > 0.005;
+    if (hasShake) {
+      ctx.save();
       const mag = engine.shakeTrauma * engine.shakeTrauma * 5.5;
-      const sx = Math.sin(now * 0.09) * mag;
-      const sy = Math.cos(now * 0.13) * mag;
+      const sx = Math.round(Math.sin(now * 0.09) * mag);
+      const sy = Math.round(Math.cos(now * 0.13) * mag);
       ctx.fillStyle = '#0D1017';
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
       ctx.translate(sx, sy);
@@ -255,54 +275,55 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     }
     ctx.drawImage(gridCacheRef.current.canvas, 0, 0);
 
-    // Locked board cells
+    const atlas = ensureSpriteAtlas();
+
+    // Locked board cells (integer 28x28 sprite-sheet blits)
     for (let r = C_VISIBLE_START; r < C_ROWS; r++) {
-      const gy = r - C_VISIBLE_START;
+      const py = (r - C_VISIBLE_START) * CELL_PX;
       const rowOff = r * C_COLS;
       for (let c = 0; c < C_COLS; c++) {
         const cid = engine.board[rowOff + c];
         if (cid !== 0) {
-          drawFacetedCell(ctx, c, gy, cid, 0);
+          ctx.drawImage(atlas.blocks, (cid - 1) * CELL_PX, 0, CELL_PX, CELL_PX, c * CELL_PX, py, CELL_PX, CELL_PX);
         }
       }
     }
 
     if (!engine.gameOver && !engine.victory) {
       const mask = engine.getMask(engine.activeId, engine.activeRot);
-      const activeTheme = COLOR_PIECE_THEMES[engine.activeId];
+      const sx = (engine.activeId - 1) * CELL_PX;
 
-      // Ghost piece
-      if (opts.ghostPiece && engine.ghostY !== engine.activeY && activeTheme) {
-        ctx.save();
-        ctx.strokeStyle = activeTheme.light;
-        ctx.fillStyle = activeTheme.glow;
-        ctx.lineWidth = 1.5;
+      // Ghost piece (sprite-sheet blit)
+      if (opts.ghostPiece && engine.ghostY !== engine.activeY && engine.activeId >= 1) {
         for (let r = 0; r < 4; r++) {
           const rowNibble = (mask >>> (r << 2)) & 0xf;
           if (rowNibble === 0) continue;
           const gy = engine.ghostY + r - C_VISIBLE_START;
           if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+          const py = gy * CELL_PX;
           for (let c = 0; c < 4; c++) {
             if ((rowNibble & (1 << c)) === 0) continue;
-            const gx = engine.activeX + c;
-            ctx.fillRect(gx * CELL_PX + 2, gy * CELL_PX + 2, CELL_PX - 4, CELL_PX - 4);
-            ctx.strokeRect(gx * CELL_PX + 2, gy * CELL_PX + 2, CELL_PX - 4, CELL_PX - 4);
+            ctx.drawImage(atlas.ghosts, sx, 0, CELL_PX, CELL_PX, (engine.activeX + c) * CELL_PX, py, CELL_PX, CELL_PX);
           }
         }
-        ctx.restore();
       }
 
-      // Active piece
-      const lockProgress = engine.getLockProgress();
+      // Active piece (sprite-sheet blit + optional lock highlight)
+      const lockAlpha = lockBucket > 0 ? Math.min(0.42, (lockBucket / 4) * 0.42) : 0;
       for (let r = 0; r < 4; r++) {
         const rowNibble = (mask >>> (r << 2)) & 0xf;
         if (rowNibble === 0) continue;
         const gy = engine.activeY + r - C_VISIBLE_START;
         if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+        const py = gy * CELL_PX;
         for (let c = 0; c < 4; c++) {
           if ((rowNibble & (1 << c)) === 0) continue;
-          const gx = engine.activeX + c;
-          drawFacetedCell(ctx, gx, gy, engine.activeId, lockProgress);
+          const px = (engine.activeX + c) * CELL_PX;
+          ctx.drawImage(atlas.blocks, sx, 0, CELL_PX, CELL_PX, px, py, CELL_PX, CELL_PX);
+          if (lockAlpha > 0) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${lockAlpha})`;
+            ctx.fillRect(px + 1, py + 1, CELL_PX - 2, CELL_PX - 2);
+          }
         }
       }
     }
@@ -326,19 +347,21 @@ export const ColorGame: React.FC<ColorGameProps> = ({
         if (life <= 0) continue;
         const maxLife = engine.particles[idx + 5] || 1;
         const alpha = Math.max(0, life / maxLife);
-        const px = engine.particles[idx] * CELL_PX;
-        const py = engine.particles[idx + 1] * CELL_PX;
+        const px = Math.round(engine.particles[idx] * CELL_PX);
+        const py = Math.round(engine.particles[idx + 1] * CELL_PX);
         const colorId = engine.particles[idx + 6];
         const theme = COLOR_PIECE_THEMES[colorId];
         ctx.fillStyle = theme ? theme.light : '#FFFFFF';
         ctx.globalAlpha = alpha;
-        const size = 2.5 + alpha * 2.5;
-        ctx.fillRect(px - size * 0.5, py - size * 0.5, size, size);
+        const size = Math.round(2.5 + alpha * 2.5);
+        ctx.fillRect(px - (size >> 1), py - (size >> 1), size, size);
       }
       ctx.globalAlpha = 1;
     }
 
-    ctx.restore();
+    if (hasShake) {
+      ctx.restore();
+    }
   }, []);
 
   // Reset engine on new run or mode change
@@ -699,16 +722,6 @@ export const ColorGame: React.FC<ColorGameProps> = ({
       data-edition="color"
       data-low-power={options.lowPowerMode ? 'on' : 'off'}
     >
-      {/* Subtle geometric obsidian backdrop */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-20"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle at 20% 20%, #1E293B 0%, transparent 45%), radial-gradient(circle at 80% 80%, #172554 0%, transparent 45%)',
-        }}
-        aria-hidden="true"
-      />
-
       {/* Top-right compact audio + quick restart */}
       <div className="pointer-events-auto absolute top-4 right-4 z-10 flex items-center gap-2">
         <button
@@ -753,16 +766,16 @@ export const ColorGame: React.FC<ColorGameProps> = ({
         )}
       </div>
 
-      {/* Sculpted metallic 3-column arcade stage */}
+      {/* Crisp flat metallic 3-column arcade stage (zero CSS blur shadows/gradients) */}
       <div className="relative z-10 flex items-start justify-center gap-1.5 px-2 sm:gap-5 sm:px-3">
         {/* Left Wing: HOLD + SCORE / LEVEL / LINES + B2B/COMBO */}
         <div className="flex w-[72px] shrink-0 flex-col gap-2 sm:w-36 sm:gap-3.5">
           {/* HOLD metallic well */}
-          <div className="rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:p-2">
+          <div className="rounded-xl border-2 border-slate-500 bg-slate-800 p-1.5 sm:p-2">
             <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-1.5 sm:text-[11px]">
               HOLD
             </div>
-            <div className="flex h-11 items-center justify-center rounded-lg border border-slate-900 bg-[#0D1017] shadow-inner sm:h-14">
+            <div className="flex h-11 items-center justify-center rounded-lg border border-slate-900 bg-[#0D1017] sm:h-14">
               <div className="scale-75 sm:scale-100">
                 <PiecePreview edition="color" pieceId={hud.holdId} dimmed={!hud.canHold} size="sm" />
               </div>
@@ -770,7 +783,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
           </div>
 
           {/* SCORE / LEVEL / LINES + Advanced Telemetry */}
-          <div className="flex flex-col gap-1.5 rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:gap-2.5 sm:p-2.5">
+          <div className="flex flex-col gap-1.5 rounded-xl border-2 border-slate-500 bg-slate-800 p-1.5 sm:gap-2.5 sm:p-2.5">
             <div className="rounded-md bg-[#0D1017] px-1.5 py-1 text-center sm:px-2 sm:py-1.5">
               <div className="text-[9px] font-bold tracking-[0.14em] text-slate-400 sm:text-[10px]">SCORE</div>
               <div
@@ -832,7 +845,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
         </div>
 
         {/* Center Metallic Beveled Playfield */}
-        <div className="shrink-0 rounded-xl border-2 border-slate-300/75 bg-gradient-to-b from-slate-500 via-slate-700 to-slate-800 p-1 shadow-2xl sm:rounded-2xl sm:p-2">
+        <div className="shrink-0 rounded-xl border-2 border-slate-400 bg-slate-700 p-1 sm:rounded-2xl sm:p-2">
           <div className="overflow-hidden rounded-lg border-2 border-slate-950 bg-[#0D1017]">
             <canvas
               ref={canvasRef}
@@ -846,11 +859,11 @@ export const ColorGame: React.FC<ColorGameProps> = ({
 
         {/* Right Wing: 5-Piece NEXT Queue + Bottom-Right Pause */}
         <div className="flex w-[72px] shrink-0 flex-col justify-between self-stretch sm:w-36">
-          <div className="rounded-xl border-2 border-slate-400/70 bg-gradient-to-b from-slate-700 to-slate-800 p-1.5 shadow-lg sm:p-2.5">
+          <div className="rounded-xl border-2 border-slate-500 bg-slate-800 p-1.5 sm:p-2.5">
             <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-2 sm:text-[11px]">
               NEXT
             </div>
-            <div className="flex flex-col items-center gap-0.5 rounded-lg border border-slate-900 bg-[#0D1017] py-1 shadow-inner sm:gap-1.5 sm:py-2">
+            <div className="flex flex-col items-center gap-0.5 rounded-lg border border-slate-900 bg-[#0D1017] py-1 sm:gap-1.5 sm:py-2">
               {hud.nextIds.map((pid, idx) => (
                 <div
                   key={idx}
@@ -865,7 +878,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
           </div>
 
           <div className="flex flex-col items-end gap-2 pt-3">
-            <div className="hidden w-full rounded-lg border border-slate-700/80 bg-slate-900/90 px-2.5 py-1.5 text-center sm:block">
+            <div className="hidden w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-center sm:block">
               <div className="text-[10px] font-bold tracking-wider text-slate-400">BEST</div>
               <div className="font-telemetry text-xs font-bold text-slate-200">{hud.bestScore}</div>
             </div>
@@ -877,7 +890,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
                 e.currentTarget.blur();
                 onPause();
               }}
-              className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-slate-400/70 bg-slate-700 text-white shadow-md transition-colors hover:border-white hover:bg-slate-600 focus-visible:outline-2 focus-visible:outline-cyan-400 sm:h-12 sm:w-12"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-slate-500 bg-slate-700 text-white transition-colors hover:border-white hover:bg-slate-600 focus-visible:outline-2 focus-visible:outline-cyan-400 sm:h-12 sm:w-12"
             >
               <Pause className="h-5 w-5" />
             </button>

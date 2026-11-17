@@ -55,9 +55,61 @@ const AmbientBoardPreview: React.FC<{ edition: Edition }> = ({ edition }) => {
     const h = 20 * cell;
 
     let timerId = 0;
-    let rafId = 0;
-    let lastTime = performance.now();
     let dropRow = 0;
+    let bgCache: HTMLCanvasElement | null = null;
+
+    const drawBlock = (ctx: CanvasRenderingContext2D, gx: number, gy: number, id: number, isMono: boolean) => {
+      const x = gx * cell;
+      const y = gy * cell;
+      if (isMono) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 4.5, y + 4.5, cell - 9, cell - 9);
+      } else {
+        const t = COLOR_PIECE_THEMES[id];
+        if (!t) return;
+        ctx.fillStyle = t.fill;
+        ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
+        ctx.fillStyle = t.light;
+        ctx.fillRect(x + 1, y + 1, cell - 2, 3);
+        ctx.fillStyle = t.dark;
+        ctx.fillRect(x + 1, y + cell - 4, cell - 2, 3);
+      }
+    };
+
+    const ensureBgCache = (isMono: boolean): HTMLCanvasElement => {
+      if (bgCache) return bgCache;
+      const off = document.createElement('canvas');
+      off.width = w;
+      off.height = h;
+      const octx = off.getContext('2d', { alpha: false });
+      if (octx) {
+        octx.fillStyle = isMono ? '#000000' : '#0D1017';
+        octx.fillRect(0, 0, w, h);
+        octx.strokeStyle = isMono ? '#191919' : '#181E2B';
+        octx.lineWidth = 1;
+        octx.beginPath();
+        for (let c = 1; c < 10; c++) {
+          octx.moveTo(c * cell + 0.5, 0);
+          octx.lineTo(c * cell + 0.5, h);
+        }
+        for (let r = 1; r < 20; r++) {
+          octx.moveTo(0, r * cell + 0.5);
+          octx.lineTo(w, r * cell + 0.5);
+        }
+        octx.stroke();
+        for (let r = 0; r < 20; r++) {
+          for (let c = 0; c < 10; c++) {
+            const id = stack[r][c];
+            if (id !== 0) drawBlock(octx, c, r, id, isMono);
+          }
+        }
+      }
+      bgCache = off;
+      return off;
+    };
 
     const drawFrame = () => {
       const canvas = canvasRef.current;
@@ -66,86 +118,24 @@ const AmbientBoardPreview: React.FC<{ edition: Edition }> = ({ edition }) => {
       if (!ctx) return;
       const isMono = editionRef.current === 'no-color';
 
-      ctx.fillStyle = isMono ? '#000000' : '#0D1017';
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.strokeStyle = isMono ? '#191919' : '#181E2B';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let c = 1; c < 10; c++) {
-        ctx.moveTo(c * cell + 0.5, 0);
-        ctx.lineTo(c * cell + 0.5, h);
-      }
-      for (let r = 1; r < 20; r++) {
-        ctx.moveTo(0, r * cell + 0.5);
-        ctx.lineTo(w, r * cell + 0.5);
-      }
-      ctx.stroke();
-
-      const drawBlock = (gx: number, gy: number, id: number) => {
-        const x = gx * cell;
-        const y = gy * cell;
-        if (isMono) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-          ctx.strokeStyle = '#000000';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x + 4.5, y + 4.5, cell - 9, cell - 9);
-        } else {
-          const t = COLOR_PIECE_THEMES[id];
-          if (!t) return;
-          ctx.fillStyle = t.fill;
-          ctx.fillRect(x + 1, y + 1, cell - 2, cell - 2);
-          ctx.fillStyle = t.light;
-          ctx.fillRect(x + 1, y + 1, cell - 2, 3);
-          ctx.fillStyle = t.dark;
-          ctx.fillRect(x + 1, y + cell - 4, cell - 2, 3);
-        }
-      };
-
-      for (let r = 0; r < 20; r++) {
-        for (let c = 0; c < 10; c++) {
-          const id = stack[r][c];
-          if (id !== 0) drawBlock(c, r, id);
-        }
-      }
+      ctx.drawImage(ensureBgCache(isMono), 0, 0);
 
       const fallY = dropRow;
-      const fallCells = [
-        [4, fallY],
-        [3, fallY + 1],
-        [4, fallY + 1],
-        [5, fallY + 1],
-      ];
-      for (const [cx, cy] of fallCells) {
-        drawBlock(cx, cy, 3);
-      }
+      drawBlock(ctx, 4, fallY, 3, isMono);
+      drawBlock(ctx, 3, fallY + 1, 3, isMono);
+      drawBlock(ctx, 4, fallY + 1, 3, isMono);
+      drawBlock(ctx, 5, fallY + 1, 3, isMono);
     };
 
-    const tickPreview = (now: number) => {
-      const dt = Math.min((now - lastTime) / 1000, 0.5);
-      lastTime = now;
-      dropOffset = (dropOffset + dt * 2.1) % 10;
-      const nextRow = Math.floor(dropOffset);
-      if (nextRow !== dropRow || editionRef.current === 'color') {
-        dropRow = nextRow;
-        drawFrame();
-      }
-      if (editionRef.current === 'no-color') {
-        timerId = window.setTimeout(() => tickPreview(performance.now()), 420);
-      } else {
-        rafId = requestAnimationFrame(tickPreview);
-      }
+    const tickPreview = () => {
+      dropRow = (dropRow + 1) % 10;
+      drawFrame();
+      timerId = window.setTimeout(tickPreview, 420);
     };
 
     drawFrame();
-    if (edition === 'no-color') {
-      timerId = window.setTimeout(() => tickPreview(performance.now()), 420);
-    } else {
-      rafId = requestAnimationFrame(tickPreview);
-    }
+    timerId = window.setTimeout(tickPreview, 420);
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
       if (timerId) window.clearTimeout(timerId);
     };
   }, [edition]);
@@ -155,7 +145,7 @@ const AmbientBoardPreview: React.FC<{ edition: Edition }> = ({ edition }) => {
       className={
         edition === 'no-color'
           ? 'border-4 border-white bg-black p-1'
-          : 'rounded-2xl border-2 border-slate-300/75 bg-gradient-to-b from-slate-500 via-slate-700 to-slate-800 p-2 shadow-2xl'
+          : 'rounded-2xl border-2 border-slate-400 bg-slate-700 p-2'
       }
     >
       <div className={edition === 'no-color' ? '' : 'overflow-hidden rounded-lg border-2 border-slate-950'}>
@@ -316,10 +306,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             type="button"
             data-start="true"
             onClick={onStart}
-            className={`w-full px-8 py-4 text-base font-extrabold tracking-wider uppercase transition-transform active:scale-[0.99] sm:w-auto ${
+            className={`w-full px-8 py-4 text-base font-extrabold tracking-wider uppercase sm:w-auto ${
               isMono
                 ? 'border-2 border-white bg-white text-black hover:bg-neutral-200'
-                : 'rounded-xl bg-emerald-500 text-slate-950 shadow-lg hover:bg-emerald-400'
+                : 'rounded-xl bg-emerald-500 text-slate-950 hover:bg-emerald-400'
             }`}
           >
             Start {isMono ? 'No Color' : 'Color'}

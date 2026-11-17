@@ -24,18 +24,19 @@
 Engineered from the ground up for ultra-low memory consumption, minimal battery/CPU draw, and stark monochrome clarity:
 - **44-Byte Row Bitboard (`Uint16Array(22)`)**: Each row of the 10×22 matrix is stored as a single 16-bit integer (bits `0..9`), enabling O(1) bitwise collision checks and instant full-row detection (`row === 0x3FF`).
 - **Packed 4×4 Piece Masks & Flat Kick Tables**: All 28 piece rotation states reside in a 56-byte `Uint16Array`, while SRS + 180° wall kicks reside in flat `Int8Array` lookup tables.
-- **Event-Driven Low-Power Mode**:
+- **Event-Driven Low-Power & 1995-Hardware Ready**:
+  - Pre-bakes a `28×28` block sprite, dashed ghost sprite, and static matrix grid onto offscreen canvases once so every frame uses pure integer `drawImage()` blits instead of per-cell stroke/fill calls.
   - Computes the exact millisecond delay until the next gravity step, lock timer, or callout expiry via `getNextWakeDelayMs()`, sleeping with `setTimeout` instead of spinning a 60 Hz `requestAnimationFrame` loop while idle.
   - Drops to **0% CPU** when paused or on Game Over (canceling all timers and animation frames).
-  - Pre-renders static grid lines onto an offscreen canvas (`drawImage()` blit) and skips redundant GPU uploads via `boardRevision` dirty-checking on an opaque `{ alpha: false }` Canvas 2D backbuffer.
-  - Maintains **0 ms input latency** by triggering synchronous canvas updates immediately on keydown or touch.
+  - Uses zero-allocation integer dirty-checking (`boardRevision`) on an opaque `{ alpha: false }` Canvas 2D backbuffer while maintaining **0 ms input latency** on keydown or touch.
 - **Complete Classic & Modern Ruleset**: 7-bag randomizer (`Uint8Array`), Hold piece, 3-piece Next queue, dashed Ghost piece, SRS + 180° rotation (`A`), Back-to-Back Quads (1.5×), Combo chains, All Clear bonuses, configurable Start Level `1–15`, and local best-score persistence.
 
 ### 2. `color/` — Advanced Modern Color Edition (`color/engine.ts` + `color/ColorGame.tsx`)
-Built for high-speed competitive play, crisp visual feedback, and adaptive power efficiency:
+Built for high-speed competitive play, crisp visual feedback, and retro-class CPU efficiency:
 - **240-Byte Compact Matrix (`Uint8Array(240)`)**: Stores the 10×24 playfield (rows `0..3` spawn buffer + rows `4..23` visible matrix) using 1 byte per cell.
+- **Pre-Baked `196×28` Faceted Sprite Atlases**: Pre-renders all 7 faceted jewel blocks and ghost outlines onto offscreen sprite sheets once at startup, replacing ~1,400 per-frame vector polygon calls with pure integer `drawImage()` blits.
 - **Zero-GC Pooled Particle Ring Buffer**: Pre-allocated `Float32Array(64 * 7)` (1,792 bytes, zero runtime allocations) drives hard-drop sparks and line-clear bursts alongside 45 ms hitstop, line-clear flash sweeps, and decaying `trauma²` camera shake.
-- **Adaptive Low-Power Scheduler & Cached Grid**: Uses an opaque `{ alpha: false }` canvas, blits the cached offscreen matrix grid, and automatically exits 60 FPS `requestAnimationFrame` into event-driven `getNextWakeDelayMs()` sleep whenever particles/shake settle and no movement keys are held.
+- **Adaptive Low-Power Scheduler & Flat Hardware UI**: Uses an opaque `{ alpha: false }` canvas, blits the cached offscreen matrix grid, eliminates CSS blur shadows and multi-stop gradients for software rasterizers, and exits 60 FPS `requestAnimationFrame` into event-driven `getNextWakeDelayMs()` sleep whenever particles/shake settle and no movement keys are held.
 - **Full Super Rotation System (SRS) + 180°**: Complete CW, CCW, and 180° rotation with JLSTZ, I, and 180° kick tables.
 - **T-Spin & Mini T-Spin Detection**: Implements the 3-corner T-slot rule around the T-piece center with front-corner + 5th kick verification (`T-Spin Zero`, `Mini`, `Single`, `Double`, `Triple`).
 - **Back-to-Back (B2B), Combo (Ren) & All Clear**: 1.5× multiplier on consecutive Quads or T-Spin line clears, escalating `50 × combo × level` chains, and Perfect Clear bonuses (`+1800` / `+3200 × level`).

@@ -88,9 +88,10 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
   });
 
   const lastHudSigRef = useRef('');
-  const lastRenderSigRef = useRef('');
+  const lastRenderStateRef = useRef({ rev: -1, lockBucket: -1, flash: -1, optsBits: -1 });
   const wakeLoopRef = useRef<() => void>(() => {});
   const gridCacheRef = useRef<{ canvas: HTMLCanvasElement; gridLines: boolean } | null>(null);
+  const spriteCacheRef = useRef<{ block: HTMLCanvasElement; ghost: HTMLCanvasElement } | null>(null);
 
   const syncHudIfChanged = useCallback((force = false) => {
     const engine = engineRef.current;
@@ -125,32 +126,37 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
     }
   }, []);
 
-  // Draw crisp pure monochrome cell (zero color channels)
-  const drawMonoCell = (
-    ctx: CanvasRenderingContext2D,
-    gx: number,
-    gy: number,
-    isActive: boolean,
-    lockAlpha: number,
-  ) => {
-    const x = gx * CELL_PX;
-    const y = gy * CELL_PX;
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(x + 1, y + 1, CELL_PX - 2, CELL_PX - 2);
-
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 5, y + 5, CELL_PX - 10, CELL_PX - 10);
-
-    if (isActive && lockAlpha > 0.05) {
-      const inset = 9;
-      ctx.fillStyle = '#000000';
-      ctx.fillRect(x + inset, y + inset, CELL_PX - inset * 2, CELL_PX - inset * 2);
+  // Pre-bake 28x28 monochrome block & dashed ghost sprites once (1995-style sprite blitting)
+  const ensureSprites = () => {
+    if (spriteCacheRef.current) return spriteCacheRef.current;
+    const block = document.createElement('canvas');
+    block.width = CELL_PX;
+    block.height = CELL_PX;
+    const bctx = block.getContext('2d');
+    if (bctx) {
+      bctx.fillStyle = '#FFFFFF';
+      bctx.fillRect(1, 1, CELL_PX - 2, CELL_PX - 2);
+      bctx.strokeStyle = '#000000';
+      bctx.lineWidth = 2;
+      bctx.strokeRect(5, 5, CELL_PX - 10, CELL_PX - 10);
     }
+
+    const ghost = document.createElement('canvas');
+    ghost.width = CELL_PX;
+    ghost.height = CELL_PX;
+    const gctx = ghost.getContext('2d');
+    if (gctx) {
+      gctx.strokeStyle = '#737373';
+      gctx.lineWidth = 1;
+      gctx.setLineDash([3, 3]);
+      gctx.strokeRect(2.5, 2.5, CELL_PX - 5, CELL_PX - 5);
+    }
+
+    spriteCacheRef.current = { block, ghost };
+    return spriteCacheRef.current;
   };
 
-  // Dirty-checked Canvas2D draw: skips redundant GPU uploads when state is unchanged
+  // Zero-allocation integer dirty-checked Canvas2D sprite blitter
   const renderCanvas = useCallback((force = false) => {
     const canvas = canvasRef.current;
     const engine = engineRef.current;
@@ -165,11 +171,21 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
     const opts = optionsRef.current;
     const lockBucket = Math.floor(engine.getLockProgress() * 4);
     const flashActive = engine.clearFlashTimer > 0 ? 1 : 0;
-    const sig = `${engine.boardRevision}|${lockBucket}|${flashActive}|${opts.gridLines ? 1 : 0}|${opts.ghostPiece ? 1 : 0}`;
-    if (!force && sig === lastRenderSigRef.current) {
+    const optsBits = (opts.gridLines ? 1 : 0) | (opts.ghostPiece ? 2 : 0) | (engine.gameOver ? 4 : 0);
+    const prev = lastRenderStateRef.current;
+    if (
+      !force &&
+      prev.rev === engine.boardRevision &&
+      prev.lockBucket === lockBucket &&
+      prev.flash === flashActive &&
+      prev.optsBits === optsBits
+    ) {
       return;
     }
-    lastRenderSigRef.current = sig;
+    prev.rev = engine.boardRevision;
+    prev.lockBucket = lockBucket;
+    prev.flash = flashActive;
+    prev.optsBits = optsBits;
 
     // Blit pre-cached static background & grid lines in 1 call
     if (!gridCacheRef.current || gridCacheRef.current.gridLines !== opts.gridLines) {
@@ -201,14 +217,16 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
     }
     ctx.drawImage(gridCacheRef.current.canvas, 0, 0);
 
-    // Locked bitboard cells
+    const sprites = ensureSprites();
+
+    // Locked bitboard cells (pure integer drawImage blits)
     for (let r = NC_VISIBLE_START; r < NC_ROWS; r++) {
       const rowBits = engine.board[r];
       if (rowBits === 0) continue;
-      const gy = r - NC_VISIBLE_START;
+      const py = (r - NC_VISIBLE_START) * CELL_PX;
       for (let c = 0; c < NC_COLS; c++) {
         if ((rowBits & (1 << c)) !== 0) {
-          drawMonoCell(ctx, c, gy, false, 0);
+          ctx.drawImage(sprites.block, c * CELL_PX, py);
         }
       }
     }
@@ -216,37 +234,37 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
     if (!engine.gameOver) {
       const mask = engine.getMask(engine.activeId, engine.activeRot);
 
-      // Ghost piece outline (monochrome dashed outline)
+      // Ghost piece outline (pre-baked sprite blit)
       if (opts.ghostPiece && engine.ghostY !== engine.activeY) {
-        ctx.save();
-        ctx.strokeStyle = '#737373';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 3]);
         for (let r = 0; r < 4; r++) {
           const rowNibble = (mask >>> (r << 2)) & 0xf;
           if (rowNibble === 0) continue;
           const gy = engine.ghostY + r - NC_VISIBLE_START;
           if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+          const py = gy * CELL_PX;
           for (let c = 0; c < 4; c++) {
             if ((rowNibble & (1 << c)) === 0) continue;
-            const gx = engine.activeX + c;
-            ctx.strokeRect(gx * CELL_PX + 2.5, gy * CELL_PX + 2.5, CELL_PX - 5, CELL_PX - 5);
+            ctx.drawImage(sprites.ghost, (engine.activeX + c) * CELL_PX, py);
           }
         }
-        ctx.restore();
       }
 
-      // Active piece
-      const lockProgress = engine.getLockProgress();
+      // Active piece + optional lock-warning center dot
+      const showLockDot = lockBucket > 0;
       for (let r = 0; r < 4; r++) {
         const rowNibble = (mask >>> (r << 2)) & 0xf;
         if (rowNibble === 0) continue;
         const gy = engine.activeY + r - NC_VISIBLE_START;
         if (gy < 0 || gy >= VISIBLE_ROWS) continue;
+        const py = gy * CELL_PX;
         for (let c = 0; c < 4; c++) {
           if ((rowNibble & (1 << c)) === 0) continue;
-          const gx = engine.activeX + c;
-          drawMonoCell(ctx, gx, gy, true, lockProgress);
+          const px = (engine.activeX + c) * CELL_PX;
+          ctx.drawImage(sprites.block, px, py);
+          if (showLockDot) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(px + 9, py + 9, CELL_PX - 18, CELL_PX - 18);
+          }
         }
       }
     }
@@ -725,7 +743,7 @@ export const NoColorGame: React.FC<NoColorGameProps> = ({
         </div>
 
         {/* Center Playfield Bezel */}
-        <div className="relative shrink-0 border-2 border-white bg-black p-0.5 shadow-[0_0_0_2px_#000] sm:border-4 sm:p-1">
+        <div className="relative shrink-0 border-2 border-white bg-black p-0.5 sm:border-4 sm:p-1">
           <canvas
             ref={canvasRef}
             width={CANVAS_W}

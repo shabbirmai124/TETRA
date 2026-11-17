@@ -26,12 +26,12 @@ export const PauseModal: React.FC<PauseModalProps> = ({
   const isMono = edition === 'no-color';
 
   const cardClass = isMono
-    ? 'w-full max-w-sm border-4 border-white bg-black p-6 text-white shadow-2xl'
-    : 'w-full max-w-sm rounded-2xl border-2 border-slate-300/75 bg-[#1C2029] p-6 text-white shadow-2xl';
+    ? 'w-full max-w-sm border-4 border-white bg-black p-6 text-white'
+    : 'w-full max-w-sm rounded-2xl border-2 border-slate-400 bg-[#1C2029] p-6 text-white';
 
   const primaryBtn = isMono
     ? 'w-full border-2 border-white bg-white py-3 text-sm font-extrabold tracking-widest text-black uppercase transition-colors hover:bg-neutral-200'
-    : 'w-full rounded-lg border border-emerald-400/50 bg-emerald-600 py-3 text-sm font-extrabold tracking-widest text-white uppercase shadow transition-colors hover:bg-emerald-500';
+    : 'w-full rounded-lg border border-emerald-400/50 bg-emerald-600 py-3 text-sm font-extrabold tracking-widest text-white uppercase transition-colors hover:bg-emerald-500';
 
   const secondaryBtn = isMono
     ? 'w-full border-2 border-neutral-500 bg-black py-2.5 text-sm font-bold tracking-widest text-white uppercase transition-colors hover:border-white'
@@ -276,8 +276,8 @@ export const EndModal: React.FC<EndModalProps> = ({
   const isVictory = !isMono && Boolean(colorResult?.victory);
 
   const cardClass = isMono
-    ? 'w-full max-w-sm border-4 border-white bg-black p-6 text-white shadow-2xl'
-    : 'w-full max-w-md rounded-2xl border-2 border-slate-300/75 bg-[#1C2029] p-6 text-white shadow-2xl';
+    ? 'w-full max-w-sm border-4 border-white bg-black p-6 text-white'
+    : 'w-full max-w-md rounded-2xl border-2 border-slate-400 bg-[#1C2029] p-6 text-white';
 
   const score = isMono ? noColorResult?.score ?? 0 : colorResult?.score ?? 0;
   const best = isMono ? noColorResult?.bestScore ?? 0 : colorResult?.bestScore ?? 0;
