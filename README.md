@@ -1,6 +1,6 @@
 # TETRA — No Color & Color Editions
 
-![TETRA — Title Screen with 3D Cut Diamonds](src/assets/images/tetra_title_showcase.png)
+![TETRA — No Color & Color Editions Split Banner](src/assets/images/tetra_readme_banner_1794917716217.jpg)
 
 > **Created by:** **Md Shabbir Mia** ([shabbirmia520@gmail.com](mailto:shabbirmia520@gmail.com))  
 > **License:** [MIT License](./LICENSE)
@@ -15,6 +15,21 @@
 | :---: | :---: |
 | ![TETRA No Color Edition Showcase](src/assets/images/tetra_nocolor_showcase.png) | ![TETRA Color Edition Showcase](src/assets/images/tetra_color_showcase.png) |
 | *44-byte bitboard · Architectural wireframe · Static cave backdrop · Overdrive 2× & Super Blast* | *3D Cut Diamond facets · Exact `#00E5FF`–`#FF7A00` gems · T-Spins · Fire Sparks · 4 Modes* |
+
+| **Title Screen & Live Edition Switch** |
+| :---: |
+| ![TETRA Title Screen Showcase](src/assets/images/tetra_title_showcase.png) |
+| *Bespoke 3D diamond emblem · Edition switcher · Marathon / Sprint 40L / Ultra 2:00 / Zen* |
+
+---
+
+## Gameplay Video Demo
+
+Watch both **Color Advanced Edition** (3D cut diamonds, Overdrive `2×` Rush, and Solar `5×5` Blast shockwave with fiery sparks) and **No Color Edition** (static rocky cave backdrop, architectural wireframe blocks, and monochrome `5×5` shockwave blast) running live:
+
+![TETRA Live Gameplay Demo — Color & No Color Editions](src/assets/demo/tetra_gameplay_demo.gif)
+
+- **HD Video (MP4 · 1280×760 · 25 fps):** [`src/assets/demo/tetra_gameplay_demo.mp4`](src/assets/demo/tetra_gameplay_demo.mp4)
 
 ---
 
@@ -113,6 +128,9 @@ Built for high-speed competitive play, crisp 3D diamond visuals, fiery impact FX
 │   ├── engine.test.ts               # Unit tests (node:test)
 │   └── ColorGame.tsx                # Faceted jewel Canvas2D renderer & adaptive loop
 ├── src/
+│   ├── assets/
+│   │   ├── demo/                    # Gameplay demo recordings (MP4 & animated GIF)
+│   │   └── images/                  # README hero banner & live edition showcase PNGs
 │   ├── audio/
 │   │   └── synth.ts                 # Original procedural Web Audio API synthesizer
 │   ├── components/
