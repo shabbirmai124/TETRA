@@ -5,12 +5,13 @@ import { NC_PIECE_MASKS, NoColorPieceId } from '../../no-color/engine';
 interface PiecePreviewProps {
   edition: 'no-color' | 'color';
   pieceId: number;
+  isSuper?: boolean;
   dimmed?: boolean;
   size?: 'sm' | 'md';
 }
 
 export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(
-  ({ edition, pieceId, dimmed = false, size = 'md' }) => {
+  ({ edition, pieceId, isSuper = false, dimmed = false, size = 'md' }) => {
     const isEmpty =
       edition === 'no-color'
         ? pieceId === NoColorPieceId.NONE || pieceId < 0 || pieceId > 6
@@ -54,7 +55,7 @@ export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(
     const cell = size === 'sm' ? 12 : 16;
     const width = cols * cell;
     const height = rows * cell;
-    const theme = edition === 'color' ? COLOR_PIECE_THEMES[pieceId] : null;
+    const theme = edition === 'color' ? COLOR_PIECE_THEMES[isSuper ? 8 : pieceId] : null;
 
     const rects: React.ReactNode[] = [];
     for (let r = minR; r <= maxR; r++) {
@@ -64,28 +65,49 @@ export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(
         const y = (r - minR) * cell;
 
         if (edition === 'no-color') {
-          rects.push(
-            <g key={`${r}-${c}`}>
-              <rect
-                x={x + 0.5}
-                y={y + 0.5}
-                width={cell - 1}
-                height={cell - 1}
-                fill={dimmed ? '#525252' : '#FFFFFF'}
-                stroke="#000000"
-                strokeWidth="1"
-              />
-              <rect
-                x={x + 3.5}
-                y={y + 3.5}
-                width={cell - 7}
-                height={cell - 7}
-                fill="none"
-                stroke="#000000"
-                strokeWidth="1"
-              />
-            </g>,
-          );
+          if (isSuper && !dimmed) {
+            rects.push(
+              <g key={`${r}-${c}`}>
+                <rect x={x + 0.5} y={y + 0.5} width={cell - 1} height={cell - 1} fill="#FFFFFF" stroke="#000000" strokeWidth="1" />
+                <rect x={x + 3} y={y + 3} width={cell - 6} height={cell - 6} fill="#111111" />
+                <polygon
+                  points={`${x + cell / 2},${y + 3.5} ${x + cell - 3.5},${y + cell / 2} ${x + cell / 2},${y + cell - 3.5} ${x + 3.5},${y + cell / 2}`}
+                  fill="#FFFFFF"
+                />
+              </g>,
+            );
+          } else {
+            rects.push(
+              <g key={`${r}-${c}`}>
+                <rect
+                  x={x + 0.5}
+                  y={y + 0.5}
+                  width={cell - 1}
+                  height={cell - 1}
+                  fill={dimmed ? '#121212' : '#191919'}
+                  stroke={dimmed ? '#6B6B6B' : '#FFFFFF'}
+                  strokeWidth="1"
+                />
+                <rect
+                  x={x + 3}
+                  y={y + 3}
+                  width={cell - 6}
+                  height={cell - 6}
+                  fill="none"
+                  stroke={dimmed ? '#4A4A4A' : '#A3A3A3'}
+                  strokeWidth="0.9"
+                />
+                <line
+                  x1={x + cell / 2}
+                  y1={y + 3}
+                  x2={x + cell / 2}
+                  y2={y + cell - 3}
+                  stroke="#525252"
+                  strokeWidth="0.75"
+                />
+              </g>,
+            );
+          }
         } else if (theme) {
           rects.push(
             <g key={`${r}-${c}`}>
@@ -94,23 +116,44 @@ export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(
                 y={y + 0.5}
                 width={cell - 1}
                 height={cell - 1}
-                rx={1.5}
-                fill={dimmed ? '#475569' : theme.fill}
+                rx={1}
+                fill={dimmed ? '#334155' : theme.fill}
               />
-              {/* Top-left bevel */}
+              {/* 3D diagonal crystal specular facet */}
+              <polygon
+                points={`${x + 1},${y + 1} ${x + cell - 1},${y + 1} ${x + 1},${y + cell - 1}`}
+                fill="rgba(255,255,255,0.22)"
+              />
+              {/* Top-left bright bevel */}
               <path
-                d={`M ${x + 1} ${y + cell - 2} L ${x + 1} ${y + 1} L ${x + cell - 2} ${y + 1}`}
+                d={`M ${x + 1} ${y + cell - 1.5} L ${x + 1} ${y + 1} L ${x + cell - 1.5} ${y + 1}`}
                 fill="none"
                 stroke={dimmed ? '#64748B' : theme.light}
                 strokeWidth="1.5"
               />
-              {/* Bottom-right bevel */}
+              {/* Bottom-right dark bevel */}
               <path
                 d={`M ${x + cell - 1.5} ${y + 1.5} L ${x + cell - 1.5} ${y + cell - 1.5} L ${x + 1.5} ${y + cell - 1.5}`}
                 fill="none"
-                stroke={dimmed ? '#334155' : theme.dark}
+                stroke={dimmed ? '#1E293B' : theme.dark}
                 strokeWidth="1.5"
               />
+              {/* Inner crystal crown */}
+              <rect
+                x={x + 3.5}
+                y={y + 3.5}
+                width={cell - 7}
+                height={cell - 7}
+                fill="none"
+                stroke={dimmed ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.48)'}
+                strokeWidth="0.8"
+              />
+              {isSuper && !dimmed && (
+                <polygon
+                  points={`${x + cell / 2},${y + 3} ${x + cell - 3},${y + cell / 2} ${x + cell / 2},${y + cell - 3} ${x + 3},${y + cell / 2}`}
+                  fill="#FFFFFF"
+                />
+              )}
             </g>,
           );
         }

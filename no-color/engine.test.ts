@@ -111,3 +111,45 @@ test('NoColorEngine detects top-out game over when spawn is blocked', () => {
   assert.equal(ev, 'gameOver');
   assert.equal(engine.gameOver, true);
 });
+
+test('NoColorEngine awards Super Block, preserves in Hold, and triggers 5x5 Blast', () => {
+  const engine = new NoColorEngine(321);
+  // Pre-fill bottom row except cols 3..6 to earn All Clear -> Super Block
+  engine.board[NC_ROWS - 1] = NC_FULL_ROW & ~(0b1111 << 3);
+
+  engine.activeId = NoColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  assert.equal(engine.hardDrop(), 'line1');
+  assert.equal(engine.allClears, 1);
+  // After All Clear, next spawned piece immediately becomes Super!
+  assert.equal(engine.isSuperActive, true);
+
+  // Hold swaps active Super status into holdIsSuper
+  assert.equal(engine.hold(), true);
+  assert.equal(engine.holdIsSuper, true);
+  assert.equal(engine.isSuperActive, false);
+
+  // Drop non-super piece, then swap Super piece back out
+  engine.hardDrop();
+  assert.equal(engine.hold(), true);
+  assert.equal(engine.isSuperActive, true);
+
+  // Place nearby blocks cleanly on an otherwise empty board to verify 5x5 blast
+  engine.board.fill(0);
+  engine.board[NC_ROWS - 1] = 0b0000111111;
+  engine.activeId = NoColorPieceId.O;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  const ev = engine.hardDrop();
+  assert.equal(ev, 'blast');
+  assert.equal(engine.superBlasts, 1);
+  assert.equal(engine.board[NC_ROWS - 1] & 0b0001111100, 0);
+  assert.ok(engine.getMemoryFootprintBytes() < 512);
+});

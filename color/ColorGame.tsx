@@ -113,7 +113,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     if (!engine) return;
     const snap = engine.getSnapshot();
     const clockBucket = Math.floor(snap.elapsedSec * 5); // 5Hz HUD clock refresh
-    const sig = `${snap.mode}|${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.canHold}|${snap.nextIds.join(',')}|${snap.calloutId}|${snap.lastCallout}|${clockBucket}|${snap.gameOver}|${snap.victory}`;
+    const sig = `${snap.mode}|${snap.score}|${snap.level}|${snap.lines}|${snap.combo}|${snap.b2b}|${snap.holdId}|${snap.holdIsSuper}|${snap.canHold}|${snap.isSuperActive}|${snap.isNextSuper}|${snap.superBlasts}|${snap.nextIds.join(',')}|${snap.calloutId}|${snap.lastCallout}|${clockBucket}|${snap.gameOver}|${snap.victory}`;
     if (force || sig !== lastHudSigRef.current) {
       lastHudSigRef.current = sig;
       if (snap.bestScore > loadBestScore(snap.mode)) {
@@ -128,62 +128,98 @@ export const ColorGame: React.FC<ColorGameProps> = ({
     soundSynth.play(ev);
   }, []);
 
-  // Pre-bake all 7 faceted jewel block & ghost sprites once into 196x28 sprite sheets (zero per-frame path tessellation)
+  // Pre-bake 8 3D-cut Crystal Prism block & ghost sprites once into 224x28 atlases (7 pieces + slot 8 Super Diamond)
   const ensureSpriteAtlas = () => {
     if (atlasCacheRef.current) return atlasCacheRef.current;
     const blocks = document.createElement('canvas');
-    blocks.width = CELL_PX * 7;
+    blocks.width = CELL_PX * 8;
     blocks.height = CELL_PX;
     const bctx = blocks.getContext('2d');
 
     const ghosts = document.createElement('canvas');
-    ghosts.width = CELL_PX * 7;
+    ghosts.width = CELL_PX * 8;
     ghosts.height = CELL_PX;
     const gctx = ghosts.getContext('2d');
 
     const s = CELL_PX;
-    for (let id = 1; id <= 7; id++) {
+    for (let id = 1; id <= 8; id++) {
       const theme = COLOR_PIECE_THEMES[id];
       if (!theme) continue;
       const x = (id - 1) * s;
 
       if (bctx) {
-        bctx.fillStyle = '#0B0F17';
+        // Deep obsidian housing border
+        bctx.fillStyle = '#070A12';
         bctx.fillRect(x, 0, s, s);
+        // Core crystal fill
         bctx.fillStyle = theme.fill;
         bctx.fillRect(x + 1, 1, s - 2, s - 2);
 
-        bctx.fillStyle = theme.light;
+        // Diagonal upper-left bright crystal prism plane
+        bctx.fillStyle = 'rgba(255,255,255,0.22)';
         bctx.beginPath();
         bctx.moveTo(x + 1, 1);
         bctx.lineTo(x + s - 1, 1);
-        bctx.lineTo(x + s - 5, 5);
-        bctx.lineTo(x + 5, 5);
-        bctx.closePath();
-        bctx.fill();
-
-        bctx.fillStyle = 'rgba(255,255,255,0.28)';
-        bctx.beginPath();
-        bctx.moveTo(x + 1, 1);
-        bctx.lineTo(x + 5, 5);
-        bctx.lineTo(x + 5, s - 5);
         bctx.lineTo(x + 1, s - 1);
         bctx.closePath();
         bctx.fill();
 
+        // Top specular bevel trapezoid
+        bctx.fillStyle = theme.light;
+        bctx.beginPath();
+        bctx.moveTo(x + 1, 1);
+        bctx.lineTo(x + s - 1, 1);
+        bctx.lineTo(x + s - 6, 6);
+        bctx.lineTo(x + 6, 6);
+        bctx.closePath();
+        bctx.fill();
+
+        // Left bright crystal rim
+        bctx.fillStyle = 'rgba(255,255,255,0.42)';
+        bctx.beginPath();
+        bctx.moveTo(x + 1, 1);
+        bctx.lineTo(x + 6, 6);
+        bctx.lineTo(x + 6, s - 6);
+        bctx.lineTo(x + 1, s - 1);
+        bctx.closePath();
+        bctx.fill();
+
+        // Bottom & right deep cut facet
         bctx.fillStyle = theme.dark;
         bctx.beginPath();
         bctx.moveTo(x + 1, s - 1);
         bctx.lineTo(x + s - 1, s - 1);
         bctx.lineTo(x + s - 1, 1);
-        bctx.lineTo(x + s - 5, 5);
-        bctx.lineTo(x + s - 5, s - 5);
-        bctx.lineTo(x + 5, s - 5);
+        bctx.lineTo(x + s - 6, 6);
+        bctx.lineTo(x + s - 6, s - 6);
+        bctx.lineTo(x + 6, s - 6);
         bctx.closePath();
         bctx.fill();
 
-        bctx.fillStyle = 'rgba(255,255,255,0.16)';
-        bctx.fillRect(x + 6, 6, s - 12, s - 12);
+        // Inner faceted jewel crown & diagonal specular glint
+        bctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        bctx.lineWidth = 1;
+        bctx.strokeRect(x + 6.5, 6.5, s - 13, s - 13);
+        bctx.fillStyle = 'rgba(255,255,255,0.34)';
+        bctx.beginPath();
+        bctx.moveTo(x + 7, 7);
+        bctx.lineTo(x + s - 7, 7);
+        bctx.lineTo(x + 7, s - 7);
+        bctx.closePath();
+        bctx.fill();
+
+        // Top-left crystal star glint (extra bold 4-point diamond for Slot 8 Super Block)
+        bctx.fillStyle = '#FFFFFF';
+        bctx.fillRect(x + 3, 3, 3, 3);
+        if (id === 8) {
+          bctx.beginPath();
+          bctx.moveTo(x + s / 2, 7);
+          bctx.lineTo(x + s - 7, s / 2);
+          bctx.lineTo(x + s / 2, s - 7);
+          bctx.lineTo(x + 7, s / 2);
+          bctx.closePath();
+          bctx.fill();
+        }
       }
 
       if (gctx) {
@@ -218,7 +254,8 @@ export const ColorGame: React.FC<ColorGameProps> = ({
       (opts.gridLines ? 1 : 0) |
       (opts.ghostPiece ? 2 : 0) |
       (engine.gameOver ? 4 : 0) |
-      (engine.victory ? 8 : 0);
+      (engine.victory ? 8 : 0) |
+      (engine.isSuperActive ? 16 : 0);
     const prev = lastRenderStateRef.current;
 
     if (
@@ -291,7 +328,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
 
     if (!engine.gameOver && !engine.victory) {
       const mask = engine.getMask(engine.activeId, engine.activeRot);
-      const sx = (engine.activeId - 1) * CELL_PX;
+      const sx = ((engine.isSuperActive ? 8 : engine.activeId) - 1) * CELL_PX;
 
       // Ghost piece (sprite-sheet blit)
       if (opts.ghostPiece && engine.ghostY !== engine.activeY && engine.activeId >= 1) {
@@ -328,18 +365,80 @@ export const ColorGame: React.FC<ColorGameProps> = ({
       }
     }
 
-    // Line clear luminous flash sweep
+    // Line-clear fiery white-gold horizontal beam + radial starburst flare
     if (engine.lineClearFlashTimer > 0) {
-      const alpha = Math.min(0.75, engine.lineClearFlashTimer * 5.2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      const t = Math.min(1, engine.lineClearFlashTimer / 0.26);
+      let firstRowPy = -1;
+      let lastRowPy = -1;
       for (let r = C_VISIBLE_START; r < C_ROWS; r++) {
         if (engine.clearingRows[r] === 1) {
-          ctx.fillRect(0, (r - C_VISIBLE_START) * CELL_PX, CANVAS_W, CELL_PX);
+          const py = (r - C_VISIBLE_START) * CELL_PX;
+          if (firstRowPy < 0) firstRowPy = py;
+          lastRowPy = py;
+          ctx.fillStyle = `rgba(249, 115, 22, ${t * 0.42})`;
+          ctx.fillRect(0, py + 2, CANVAS_W, CELL_PX - 4);
+          ctx.fillStyle = `rgba(254, 240, 138, ${t * 0.72})`;
+          ctx.fillRect(0, py + 6, CANVAS_W, CELL_PX - 12);
+          ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1, t * 1.15)})`;
+          ctx.fillRect(0, py + Math.floor(CELL_PX / 2) - 3, CANVAS_W, 6);
         }
+      }
+      if (firstRowPy >= 0) {
+        const cx = Math.round(engine.lastImpactX * CELL_PX);
+        const cy = Math.round((firstRowPy + lastRowPy + CELL_PX) * 0.5);
+        const rayLen = 28 + t * 48;
+        ctx.strokeStyle = `rgba(254, 240, 138, ${t * 0.9})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx - rayLen * 1.35, cy);
+        ctx.lineTo(cx + rayLen * 1.35, cy);
+        ctx.moveTo(cx, cy - rayLen * 0.95);
+        ctx.lineTo(cx, cy + rayLen * 0.95);
+        ctx.stroke();
+
+        ctx.strokeStyle = `rgba(255, 255, 255, ${t})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - rayLen * 1.45, cy);
+        ctx.lineTo(cx + rayLen * 1.45, cy);
+        ctx.moveTo(cx, cy - rayLen);
+        ctx.lineTo(cx, cy + rayLen);
+        ctx.moveTo(cx - rayLen * 0.65, cy - rayLen * 0.65);
+        ctx.lineTo(cx + rayLen * 0.65, cy + rayLen * 0.65);
+        ctx.moveTo(cx - rayLen * 0.65, cy + rayLen * 0.65);
+        ctx.lineTo(cx + rayLen * 0.65, cy - rayLen * 0.65);
+        ctx.stroke();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(cx - 5, cy - 5, 10, 10);
       }
     }
 
-    // Zero-GC pooled particle bursts
+    // 5x5 Super Blast fiery shockwave ring + starburst flare
+    if (engine.blastFlashTimer > 0) {
+      const bt = Math.min(1, engine.blastFlashTimer / 0.28);
+      const bx = Math.round(engine.lastImpactX * CELL_PX);
+      const by = Math.round(engine.lastImpactY * CELL_PX);
+      const radius = Math.round((1 - bt) * 88 + 18);
+      ctx.strokeStyle = `rgba(251, 146, 60, ${bt * 0.85})`;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(bx, by, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(255, 255, 255, ${bt})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(bx, by, Math.max(8, radius - 4), 0, Math.PI * 2);
+      const flare = 26 + bt * 54;
+      ctx.moveTo(bx - flare, by);
+      ctx.lineTo(bx + flare, by);
+      ctx.moveTo(bx, by - flare);
+      ctx.lineTo(bx, by + flare);
+      ctx.stroke();
+    }
+
+    // Zero-GC pooled fire-spark streaks & crystal shards
     if (engine.activeParticlesCount > 0) {
       for (let i = 0; i < PARTICLE_POOL_CAP; i++) {
         const idx = i * PARTICLE_STRIDE;
@@ -349,12 +448,30 @@ export const ColorGame: React.FC<ColorGameProps> = ({
         const alpha = Math.max(0, life / maxLife);
         const px = Math.round(engine.particles[idx] * CELL_PX);
         const py = Math.round(engine.particles[idx + 1] * CELL_PX);
+        const vx = engine.particles[idx + 2];
+        const vy = engine.particles[idx + 3];
         const colorId = engine.particles[idx + 6];
-        const theme = COLOR_PIECE_THEMES[colorId];
-        ctx.fillStyle = theme ? theme.light : '#FFFFFF';
-        ctx.globalAlpha = alpha;
-        const size = Math.round(2.5 + alpha * 2.5);
-        ctx.fillRect(px - (size >> 1), py - (size >> 1), size, size);
+
+        if (colorId === 0) {
+          // Fiery white-gold-orange ember streak (matching reference starburst)
+          const tx = Math.round((engine.particles[idx] - vx * 0.028) * CELL_PX);
+          const ty = Math.round((engine.particles[idx + 1] - vy * 0.028) * CELL_PX);
+          ctx.strokeStyle = alpha > 0.68 ? '#FEF08A' : alpha > 0.35 ? '#F97316' : '#EA580C';
+          ctx.lineWidth = alpha > 0.6 ? 2.5 : 1.5;
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          ctx.moveTo(tx, ty);
+          ctx.lineTo(px, py);
+          ctx.stroke();
+          ctx.fillStyle = alpha > 0.55 ? '#FFFFFF' : '#FDE047';
+          ctx.fillRect(px - 1, py - 1, 3, 3);
+        } else {
+          const theme = COLOR_PIECE_THEMES[colorId];
+          ctx.fillStyle = theme ? theme.light : '#FFFFFF';
+          ctx.globalAlpha = alpha;
+          const size = Math.round(2.5 + alpha * 2.5);
+          ctx.fillRect(px - (size >> 1), py - (size >> 1), size, size);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -761,7 +878,11 @@ export const ColorGame: React.FC<ColorGameProps> = ({
           </div>
         ) : (
           <div className="text-xs font-bold tracking-[0.18em] text-slate-400">
-            COLOR · {modeLabel}{options.lowPowerMode ? ' · LOW POWER' : ''}
+            {hud.isSuperActive
+              ? 'SUPER BLOCK ACTIVE'
+              : hud.isNextSuper
+                ? 'SUPER BLOCK NEXT'
+                : `COLOR · ${modeLabel}${options.lowPowerMode ? ' · LOW POWER' : ''}`}
           </div>
         )}
       </div>
@@ -773,11 +894,17 @@ export const ColorGame: React.FC<ColorGameProps> = ({
           {/* HOLD metallic well */}
           <div className="rounded-xl border-2 border-slate-500 bg-slate-800 p-1.5 sm:p-2">
             <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-1.5 sm:text-[11px]">
-              HOLD
+              HOLD{hud.holdIsSuper ? ' ★' : ''}
             </div>
             <div className="flex h-11 items-center justify-center rounded-lg border border-slate-900 bg-[#0D1017] sm:h-14">
               <div className="scale-75 sm:scale-100">
-                <PiecePreview edition="color" pieceId={hud.holdId} dimmed={!hud.canHold} size="sm" />
+                <PiecePreview
+                  edition="color"
+                  pieceId={hud.holdId}
+                  isSuper={hud.holdIsSuper}
+                  dimmed={!hud.canHold}
+                  size="sm"
+                />
               </div>
             </div>
           </div>
@@ -841,6 +968,14 @@ export const ColorGame: React.FC<ColorGameProps> = ({
               <span>T-SPINS</span>
               <span className="font-telemetry font-bold text-purple-300">{hud.tSpins}</span>
             </div>
+            {(hud.isSuperActive || hud.isNextSuper || hud.superBlasts > 0) && (
+              <div className="hidden items-center justify-between px-1 text-[11px] text-amber-300 sm:flex">
+                <span>{hud.isSuperActive ? 'SUPER' : hud.isNextSuper ? 'READY' : 'BLASTS'}</span>
+                <span className="font-telemetry font-bold">
+                  {hud.isSuperActive ? '5x5' : hud.isNextSuper ? 'NEXT' : hud.superBlasts}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -861,7 +996,7 @@ export const ColorGame: React.FC<ColorGameProps> = ({
         <div className="flex w-[72px] shrink-0 flex-col justify-between self-stretch sm:w-36">
           <div className="rounded-xl border-2 border-slate-500 bg-slate-800 p-1.5 sm:p-2.5">
             <div className="mb-1 text-center text-[10px] font-extrabold tracking-[0.14em] text-slate-100 sm:mb-2 sm:text-[11px]">
-              NEXT
+              NEXT{hud.isNextSuper ? ' ★' : ''}
             </div>
             <div className="flex flex-col items-center gap-0.5 rounded-lg border border-slate-900 bg-[#0D1017] py-1 sm:gap-1.5 sm:py-2">
               {hud.nextIds.map((pid, idx) => (
@@ -871,7 +1006,12 @@ export const ColorGame: React.FC<ColorGameProps> = ({
                     idx === 0 ? 'opacity-100' : idx < 3 ? 'opacity-90' : 'hidden opacity-75 sm:block'
                   }`}
                 >
-                  <PiecePreview edition="color" pieceId={pid} size={idx === 0 ? 'md' : 'sm'} />
+                  <PiecePreview
+                    edition="color"
+                    pieceId={pid}
+                    isSuper={idx === 0 && hud.isNextSuper}
+                    size={idx === 0 ? 'md' : 'sm'}
+                  />
                 </div>
               ))}
             </div>

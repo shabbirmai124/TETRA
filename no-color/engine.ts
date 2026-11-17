@@ -152,6 +152,7 @@ export type NoColorStepEvent =
   | 'line2'
   | 'line3'
   | 'quad'
+  | 'blast'
   | 'levelUp'
   | 'gameOver';
 
@@ -165,10 +166,14 @@ export interface NoColorSnapshot {
   b2bCount: number;
   quads: number;
   allClears: number;
+  superBlasts: number;
+  isSuperActive: boolean;
+  isNextSuper: boolean;
   piecesPlaced: number;
   lastCallout: string;
   gameOver: boolean;
   holdId: number;
+  holdIsSuper: boolean;
   canHold: boolean;
   nextIds: [number, number, number];
   memoryBytes: number;
@@ -218,9 +223,21 @@ export class NoColorEngine {
   private lockResets = 0;
   private isGrounded = false;
 
-  // Line flash timer (for brief monochrome invert flash before collapse, kept lightweight)
+  // Super Block reward & blast state (scalar primitives, 0 extra TypedArray heap)
+  public isNextSuper = false;
+  public isSuperActive = false;
+  public holdIsSuper = false;
+  public superBlasts = 0;
+  private nextSuperAtLines = 8;
+
+  // Line flash & impact FX state (consumed by monochrome spark/beam renderer)
   public clearFlashTimer = 0;
   public clearFlashRowsMask = 0; // 22-bit mask of rows flashing
+  public blastFlashTimer = 0;
+  public lastImpactX = 4.5;
+  public lastImpactY = 18;
+  public lastImpactKind: 0 | 1 | 2 = 0; // 0 = drop, 1 = lineClear, 2 = superBlast
+  public impactNonce = 0;
 
   private rngState: number;
 
@@ -279,6 +296,16 @@ export class NoColorEngine {
     this.isGrounded = false;
     this.clearFlashTimer = 0;
     this.clearFlashRowsMask = 0;
+    this.blastFlashTimer = 0;
+    this.isNextSuper = false;
+    this.isSuperActive = false;
+    this.holdIsSuper = false;
+    this.superBlasts = 0;
+    this.nextSuperAtLines = 8;
+    this.lastImpactX = 4.5;
+    this.lastImpactY = 18;
+    this.lastImpactKind = 0;
+    this.impactNonce = 0;
     this.boardRevision++;
 
     this.spawnNext();
@@ -333,11 +360,14 @@ export class NoColorEngine {
 
   private spawnNext(): boolean {
     const id = this.popBag();
-    return this.spawnPiece(id);
+    const superPiece = this.isNextSuper;
+    this.isNextSuper = false;
+    return this.spawnPiece(id, superPiece);
   }
 
-  private spawnPiece(id: number): boolean {
+  private spawnPiece(id: number, superPiece = false): boolean {
     this.activeId = id;
+    this.isSuperActive = superPiece;
     this.activeRot = 0;
     this.activeX = 3;
     this.activeY = 0;
@@ -447,6 +477,10 @@ export class NoColorEngine {
       this.score += dist * 2;
       if (this.score > this.bestScore) this.bestScore = this.score;
     }
+    this.lastImpactX = this.activeX + 2;
+    this.lastImpactY = this.activeY + 1.5;
+    this.lastImpactKind = 0;
+    this.impactNonce++;
     const ev = this.lockActivePiece();
     return ev === 'lock' ? 'hardDrop' : ev;
   }
@@ -454,13 +488,17 @@ export class NoColorEngine {
   public hold(): boolean {
     if (this.gameOver || !this.canHold) return false;
     const current = this.activeId;
+    const currentSuper = this.isSuperActive;
     if (this.holdId === NoColorPieceId.NONE) {
       this.holdId = current;
+      this.holdIsSuper = currentSuper;
       this.spawnNext();
     } else {
       const swapped = this.holdId;
+      const swappedSuper = this.holdIsSuper;
       this.holdId = current;
-      this.spawnPiece(swapped);
+      this.holdIsSuper = currentSuper;
+      this.spawnPiece(swapped, swappedSuper);
     }
     this.canHold = false;
     this.boardRevision++;
@@ -479,8 +517,8 @@ export class NoColorEngine {
    */
   public getNextWakeDelayMs(): number {
     if (this.gameOver) return 1000;
-    if (this.clearFlashTimer > 0) {
-      return Math.max(16, Math.ceil(this.clearFlashTimer * 1000));
+    if (this.clearFlashTimer > 0 || this.blastFlashTimer > 0) {
+      return 16;
     }
     let nextSec = 1.0;
     if (this.isGrounded) {
@@ -501,6 +539,13 @@ export class NoColorEngine {
     if (this.clearFlashTimer > 0) {
       this.clearFlashTimer = Math.max(0, this.clearFlashTimer - dt);
       if (this.clearFlashTimer === 0) {
+        this.boardRevision++;
+      }
+    }
+
+    if (this.blastFlashTimer > 0) {
+      this.blastFlashTimer = Math.max(0, this.blastFlashTimer - dt);
+      if (this.blastFlashTimer === 0) {
         this.boardRevision++;
       }
     }
@@ -553,8 +598,11 @@ export class NoColorEngine {
 
   private lockActivePiece(): NoColorStepEvent {
     const mask = this.getMask(this.activeId, this.activeRot);
+    const wasSuper = this.isSuperActive;
     let anyVisible = false;
-
+    let sumX = 0;
+    let sumY = 0;
+    let cellCount = 0;
     for (let r = 0; r < 4; r++) {
       const rowNibble = (mask >>> (r << 2)) & 0xf;
       if (rowNibble === 0) continue;
@@ -563,7 +611,11 @@ export class NoColorEngine {
       if (by >= NC_VISIBLE_START) anyVisible = true;
       for (let c = 0; c < 4; c++) {
         if ((rowNibble & (1 << c)) !== 0) {
-          this.board[by] |= 1 << (this.activeX + c);
+          const bx = this.activeX + c;
+          this.board[by] |= 1 << bx;
+          sumX += bx + 0.5;
+          sumY += by;
+          cellCount++;
         }
       }
     }
@@ -575,8 +627,12 @@ export class NoColorEngine {
     }
 
     this.piecesPlaced++;
+    const impactCx = cellCount > 0 ? sumX / cellCount : this.activeX + 2;
+    const impactCy = cellCount > 0 ? sumY / cellCount : this.activeY + 1;
+    this.lastImpactX = impactCx;
+    this.lastImpactY = impactCy;
 
-    // Bitwise line clear scan (bottom to top)
+    // Bitwise line clear scan (bottom to top) before 5x5 blast so full lines still score cleanly
     let cleared = 0;
     let writeRow = NC_ROWS - 1;
     let flashMask = 0;
@@ -596,13 +652,18 @@ export class NoColorEngine {
     }
 
     let levelChanged = false;
+    let callout = '';
     if (cleared > 0) {
       this.clearFlashRowsMask = flashMask;
-      this.clearFlashTimer = 0.08;
+      this.clearFlashTimer = 0.24;
+      if (!wasSuper) {
+        this.lastImpactKind = 1;
+        this.impactNonce++;
+      }
       this.combo++;
 
       let basePoints = cleared === 1 ? 100 : cleared === 2 ? 300 : cleared === 3 ? 500 : 800;
-      let callout = cleared === 1 ? 'SINGLE' : cleared === 2 ? 'DOUBLE' : cleared === 3 ? 'TRIPLE' : 'QUAD!';
+      callout = cleared === 1 ? 'SINGLE' : cleared === 2 ? 'DOUBLE' : cleared === 3 ? 'TRIPLE' : 'QUAD!';
 
       if (cleared === 4) {
         this.quads++;
@@ -610,6 +671,7 @@ export class NoColorEngine {
           basePoints = Math.floor(basePoints * 1.5);
           this.b2bCount++;
           callout = 'BACK-TO-BACK QUAD!';
+          this.isNextSuper = true;
         }
         this.b2b = true;
       } else {
@@ -626,10 +688,8 @@ export class NoColorEngine {
         this.allClears++;
         allClearBonus = cleared === 4 ? 3200 : 1800;
         callout = `${callout} · ALL CLEAR!`;
+        this.isNextSuper = true;
       }
-
-      this.lastCallout = callout;
-      this.calloutTimer = 1.25;
 
       this.score += (basePoints + allClearBonus) * this.level + comboBonus;
       if (this.score > this.bestScore) this.bestScore = this.score;
@@ -638,8 +698,50 @@ export class NoColorEngine {
       this.lines += cleared;
       this.level = Math.max(this.startLevel, Math.floor(this.lines / 10) + this.startLevel);
       levelChanged = this.level > prevLevel;
+
+      if (this.lines >= this.nextSuperAtLines) {
+        while (this.lines >= this.nextSuperAtLines) this.nextSuperAtLines += 8;
+        this.isNextSuper = true;
+      }
     } else {
       this.combo = -1;
+    }
+
+    // Super Block 5x5 Shockwave Blast on landing
+    let blastedCells = 0;
+    if (wasSuper) {
+      this.isSuperActive = false;
+      this.superBlasts++;
+      const minX = Math.max(0, Math.floor(impactCx) - 2);
+      const maxX = Math.min(NC_COLS - 1, Math.floor(impactCx) + 2);
+      const minY = Math.max(NC_VISIBLE_START, Math.floor(impactCy) - 2);
+      const maxY = Math.min(NC_ROWS - 1, Math.floor(impactCy) + 2);
+      let clearColMask = 0;
+      for (let x = minX; x <= maxX; x++) clearColMask |= 1 << x;
+      for (let y = minY; y <= maxY; y++) {
+        const hitBits = this.board[y] & clearColMask;
+        if (hitBits !== 0) {
+          let m = hitBits;
+          while (m !== 0) {
+            m &= m - 1;
+            blastedCells++;
+          }
+          this.board[y] &= ~clearColMask;
+        }
+      }
+      this.blastFlashTimer = 0.28;
+      this.lastImpactKind = 2;
+      this.impactNonce++;
+      this.score += (blastedCells * 100 + 250) * this.level;
+      if (this.score > this.bestScore) this.bestScore = this.score;
+      callout = callout ? `SUPER BLAST! · ${callout}` : blastedCells > 0 ? `SUPER BLAST! +${blastedCells}` : 'SUPER BLAST!';
+    } else if (cleared > 0 && this.isNextSuper) {
+      callout = `${callout} · SUPER READY!`;
+    }
+
+    if (callout) {
+      this.lastCallout = callout;
+      this.calloutTimer = 1.35;
     }
 
     this.canHold = true;
@@ -649,6 +751,7 @@ export class NoColorEngine {
       return 'gameOver';
     }
 
+    if (wasSuper) return 'blast';
     if (cleared === 4) return 'quad';
     if (cleared === 3) return 'line3';
     if (cleared === 2) return 'line2';
@@ -662,7 +765,7 @@ export class NoColorEngine {
   }
 
   public getMemoryFootprintBytes(): number {
-    // 44 bytes board + 14 bytes bags + 56 bytes masks + 200 bytes kicks
+    // 44 bytes board + 14 bytes bags + 56 bytes masks + 200 bytes kicks = 314 bytes
     return (
       this.board.byteLength +
       this.bagA.byteLength +
@@ -687,10 +790,14 @@ export class NoColorEngine {
       b2bCount: this.b2bCount,
       quads: this.quads,
       allClears: this.allClears,
+      superBlasts: this.superBlasts,
+      isSuperActive: this.isSuperActive,
+      isNextSuper: this.isNextSuper,
       piecesPlaced: this.piecesPlaced,
       lastCallout: this.calloutTimer > 0 ? this.lastCallout : '',
       gameOver: this.gameOver,
       holdId: this.holdId,
+      holdIsSuper: this.holdIsSuper,
       canHold: this.canHold,
       nextIds,
       memoryBytes: this.getMemoryFootprintBytes(),

@@ -40,58 +40,66 @@ export const COLOR_PIECE_THEMES: Record<number, PieceTheme> = {
   [ColorPieceId.I]: {
     id: 1,
     name: 'I',
-    fill: '#06B6D4',
-    light: '#67E8F9',
-    dark: '#0E7490',
-    glow: 'rgba(6, 182, 212, 0.38)',
+    fill: '#00D8F5',
+    light: '#A5F3FC',
+    dark: '#087EA4',
+    glow: 'rgba(0, 216, 245, 0.36)',
   },
   [ColorPieceId.O]: {
     id: 2,
     name: 'O',
-    fill: '#EAB308',
-    light: '#FDE047',
-    dark: '#A16207',
-    glow: 'rgba(234, 179, 8, 0.35)',
+    fill: '#F59E0B',
+    light: '#FDE68A',
+    dark: '#92400E',
+    glow: 'rgba(245, 158, 11, 0.38)',
   },
   [ColorPieceId.T]: {
     id: 3,
     name: 'T',
     fill: '#A855F7',
-    light: '#D8B4FE',
-    dark: '#6B21A8',
+    light: '#E9D5FF',
+    dark: '#581C87',
     glow: 'rgba(168, 85, 247, 0.38)',
   },
   [ColorPieceId.S]: {
     id: 4,
     name: 'S',
-    fill: '#22C55E',
-    light: '#86EFAC',
-    dark: '#15803D',
-    glow: 'rgba(34, 197, 94, 0.36)',
+    fill: '#10B981',
+    light: '#6EE7B7',
+    dark: '#065F46',
+    glow: 'rgba(16, 185, 129, 0.36)',
   },
   [ColorPieceId.Z]: {
     id: 5,
     name: 'Z',
-    fill: '#EF4444',
-    light: '#FCA5A5',
-    dark: '#B91C1C',
-    glow: 'rgba(239, 68, 68, 0.38)',
+    fill: '#F43F5E',
+    light: '#FDA4AF',
+    dark: '#9F1239',
+    glow: 'rgba(244, 63, 94, 0.38)',
   },
   [ColorPieceId.J]: {
     id: 6,
     name: 'J',
-    fill: '#3B82F6',
+    fill: '#2563EB',
     light: '#93C5FD',
-    dark: '#1D4ED8',
-    glow: 'rgba(59, 130, 246, 0.38)',
+    dark: '#1E3A8A',
+    glow: 'rgba(37, 99, 235, 0.38)',
   },
   [ColorPieceId.L]: {
     id: 7,
     name: 'L',
-    fill: '#F97316',
-    light: '#FDBA74',
-    dark: '#C2410C',
-    glow: 'rgba(249, 115, 22, 0.38)',
+    fill: '#FB923C',
+    light: '#FED7AA',
+    dark: '#9A3412',
+    glow: 'rgba(251, 146, 60, 0.38)',
+  },
+  8: {
+    id: 8,
+    name: 'SUPER',
+    fill: '#FACC15',
+    light: '#FFFFFF',
+    dark: '#B45309',
+    glow: 'rgba(253, 224, 71, 0.45)',
   },
 };
 
@@ -223,6 +231,7 @@ export type ColorStepEvent =
   | 'line3'
   | 'quad'
   | 'tspin'
+  | 'blast'
   | 'levelUp'
   | 'victory'
   | 'gameOver';
@@ -240,11 +249,15 @@ export interface ColorSnapshot {
   tSpins: number;
   quads: number;
   allClears: number;
+  superBlasts: number;
+  isSuperActive: boolean;
+  isNextSuper: boolean;
   piecesPlaced: number;
   elapsedSec: number;
   remainingSec: number;
   pps: number;
   holdId: number;
+  holdIsSuper: boolean;
   canHold: boolean;
   nextIds: [number, number, number, number, number];
   lastCallout: string;
@@ -254,9 +267,9 @@ export interface ColorSnapshot {
   memoryBytes: number;
 }
 
-// Pre-allocated zero-GC particle ring buffer (64 particles * 7 floats = 1792B)
-export const PARTICLE_POOL_CAP = 64;
-export const PARTICLE_STRIDE = 7; // x, y, vx, vy, life, maxLife, colorId
+// Pre-allocated zero-GC particle ring buffer (72 particles * 7 floats = 2016B)
+export const PARTICLE_POOL_CAP = 72;
+export const PARTICLE_STRIDE = 7; // x, y, vx, vy, life, maxLife, colorId (0 = fire spark)
 
 export class ColorEngine {
   // 240 bytes for 10x24 matrix
@@ -275,6 +288,9 @@ export class ColorEngine {
   public hitstopTimer = 0;
   public shakeTrauma = 0;
   public lineClearFlashTimer = 0;
+  public blastFlashTimer = 0;
+  public lastImpactX = 4.5;
+  public lastImpactY = 18;
   public readonly clearingRows = new Uint8Array(C_ROWS);
 
   // Mode & rules
@@ -286,7 +302,14 @@ export class ColorEngine {
   public ghostY = 0;
 
   public holdId: number = ColorPieceId.NONE;
+  public holdIsSuper = false;
   public canHold = true;
+
+  // Super Block reward & blast state
+  public isNextSuper = false;
+  public isSuperActive = false;
+  public superBlasts = 0;
+  private nextSuperAtLines = 8;
 
   // Telemetry & scoring
   public score = 0;
@@ -369,7 +392,12 @@ export class ColorEngine {
     this.bagIndex = 0;
 
     this.holdId = ColorPieceId.NONE;
+    this.holdIsSuper = false;
     this.canHold = true;
+    this.isNextSuper = false;
+    this.isSuperActive = false;
+    this.superBlasts = 0;
+    this.nextSuperAtLines = 8;
     this.score = 0;
     this.level = mode === 'zen' ? 1 : this.startLevel;
     this.lines = 0;
@@ -393,6 +421,9 @@ export class ColorEngine {
     this.hitstopTimer = 0;
     this.shakeTrauma = 0;
     this.lineClearFlashTimer = 0;
+    this.blastFlashTimer = 0;
+    this.lastImpactX = 4.5;
+    this.lastImpactY = 18;
 
     this.lastActionWasRotation = false;
     this.lastRotationKickIndex = 0;
@@ -458,11 +489,15 @@ export class ColorEngine {
   }
 
   private spawnNext(): boolean {
-    return this.spawnPiece(this.popBag());
+    const id = this.popBag();
+    const superPiece = this.isNextSuper;
+    this.isNextSuper = false;
+    return this.spawnPiece(id, superPiece);
   }
 
-  private spawnPiece(id: number): boolean {
+  private spawnPiece(id: number, superPiece = false): boolean {
     this.activeId = id;
+    this.isSuperActive = superPiece;
     this.activeRot = 0;
     this.activeX = 3;
     this.activeY = 2; // spawn inside top visible boundary buffer (rows 2..3)
@@ -593,13 +628,17 @@ export class ColorEngine {
   public hold(): boolean {
     if (this.gameOver || this.victory || !this.canHold) return false;
     const current = this.activeId;
+    const currentSuper = this.isSuperActive;
     if (this.holdId === ColorPieceId.NONE) {
       this.holdId = current;
+      this.holdIsSuper = currentSuper;
       this.spawnNext();
     } else {
       const swapped = this.holdId;
+      const swappedSuper = this.holdIsSuper;
       this.holdId = current;
-      this.spawnPiece(swapped);
+      this.holdIsSuper = currentSuper;
+      this.spawnPiece(swapped, swappedSuper);
     }
     this.canHold = false;
     this.boardRevision++;
@@ -656,6 +695,7 @@ export class ColorEngine {
 
   private spawnDropImpactParticles(): void {
     const mask = this.getMask(this.activeId, this.activeRot);
+    const sparkColor = this.isSuperActive ? 8 : this.activeId;
     for (let r = 0; r < 4; r++) {
       const rowNibble = (mask >>> (r << 2)) & 0xf;
       if (rowNibble === 0) continue;
@@ -665,9 +705,9 @@ export class ColorEngine {
         const wy = this.activeY + r - C_VISIBLE_START + 0.9;
         if (wy < 0) continue;
         for (let k = 0; k < 2; k++) {
-          const vx = (this.nextRand(200) - 100) / 40;
-          const vy = -(this.nextRand(100) + 40) / 45;
-          this.emitParticle(wx, wy, vx, vy, 0.28, this.activeId);
+          const vx = (this.nextRand(220) - 110) / 36;
+          const vy = -(this.nextRand(120) + 50) / 40;
+          this.emitParticle(wx, wy, vx, vy, 0.3, k === 0 ? 0 : sparkColor);
         }
       }
     }
@@ -676,13 +716,26 @@ export class ColorEngine {
   private spawnLineClearParticles(rowY: number): void {
     const vy = rowY - C_VISIBLE_START + 0.5;
     if (vy < 0) return;
+    // Emit outward fire sparks from both the impact center & row cells
     for (let x = 0; x < C_COLS; x++) {
       const cellColor = this.board[rowY * C_COLS + x] || this.activeId;
-      for (let k = 0; k < 2; k++) {
-        const pvx = (this.nextRand(240) - 120) / 25;
-        const pvy = (this.nextRand(200) - 140) / 28;
-        this.emitParticle(x + 0.5, vy, pvx, pvy, 0.45, cellColor);
+      const pvx = (x - this.lastImpactX) * 1.15 + (this.nextRand(180) - 90) / 30;
+      const pvy = -(this.nextRand(220) + 60) / 32;
+      this.emitParticle(x + 0.5, vy, pvx, pvy, 0.44, 0); // golden-white fire spark
+      if ((x & 1) === 0) {
+        this.emitParticle(x + 0.5, vy, pvx * 0.85, pvy * 0.8, 0.42, cellColor);
       }
+    }
+  }
+
+  private spawnBlastParticles(cx: number, cyVisible: number): void {
+    for (let i = 0; i < 36; i++) {
+      const angle = (i / 36) * Math.PI * 2 + (this.nextRand(40) - 20) / 100;
+      const speed = 3.2 + this.nextRand(65) / 10;
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed - 1.5;
+      const cid = i % 3 === 0 ? 8 : 0; // mix hot fire sparks + solar diamond sparks
+      this.emitParticle(cx, cyVisible, vx, vy, 0.48 + this.nextRand(16) / 100, cid);
     }
   }
 
@@ -691,6 +744,7 @@ export class ColorEngine {
       this.activeParticlesCount > 0 ||
       this.shakeTrauma > 0.005 ||
       this.lineClearFlashTimer > 0 ||
+      this.blastFlashTimer > 0 ||
       this.hitstopTimer > 0
     );
   }
@@ -717,6 +771,10 @@ export class ColorEngine {
     if (this.lineClearFlashTimer > 0) {
       this.lineClearFlashTimer = Math.max(0, this.lineClearFlashTimer - dt);
       if (this.lineClearFlashTimer === 0) this.boardRevision++;
+    }
+    if (this.blastFlashTimer > 0) {
+      this.blastFlashTimer = Math.max(0, this.blastFlashTimer - dt);
+      if (this.blastFlashTimer === 0) this.boardRevision++;
     }
     if (this.calloutTimer > 0) {
       this.calloutTimer = Math.max(0, this.calloutTimer - dt);
@@ -798,7 +856,12 @@ export class ColorEngine {
   private lockActivePiece(): ColorStepEvent {
     const tSpin = this.detectTSpin();
     const mask = this.getMask(this.activeId, this.activeRot);
+    const wasSuper = this.isSuperActive;
+    const lockedColor = wasSuper ? 8 : this.activeId;
     let anyVisible = false;
+    let sumX = 0;
+    let sumY = 0;
+    let cellCount = 0;
 
     for (let r = 0; r < 4; r++) {
       const rowNibble = (mask >>> (r << 2)) & 0xf;
@@ -808,7 +871,11 @@ export class ColorEngine {
       if (by >= C_VISIBLE_START) anyVisible = true;
       for (let c = 0; c < 4; c++) {
         if ((rowNibble & (1 << c)) !== 0) {
-          this.board[by * C_COLS + (this.activeX + c)] = this.activeId;
+          const bx = this.activeX + c;
+          this.board[by * C_COLS + bx] = lockedColor;
+          sumX += bx + 0.5;
+          sumY += by;
+          cellCount++;
         }
       }
     }
@@ -819,8 +886,12 @@ export class ColorEngine {
     }
 
     this.piecesPlaced++;
+    const impactCx = cellCount > 0 ? sumX / cellCount : this.activeX + 2;
+    const impactCy = cellCount > 0 ? sumY / cellCount : this.activeY + 1;
+    this.lastImpactX = impactCx;
+    this.lastImpactY = Math.max(0.5, impactCy - C_VISIBLE_START + 0.5);
 
-    // Scan full lines
+    // Scan full lines first so line clears score before Super Blast destroys nearby debris
     this.clearingRows.fill(0);
     let cleared = 0;
     for (let y = C_ROWS - 1; y >= 0; y--) {
@@ -841,7 +912,7 @@ export class ColorEngine {
 
     // Collapse cleared lines
     if (cleared > 0) {
-      this.lineClearFlashTimer = 0.14;
+      this.lineClearFlashTimer = 0.26;
       let writeY = C_ROWS - 1;
       for (let readY = C_ROWS - 1; readY >= 0; readY--) {
         if (this.clearingRows[readY] === 1) continue;
@@ -918,6 +989,7 @@ export class ColorEngine {
           baseScore = Math.floor(baseScore * 1.5);
           this.b2bCount++;
           calloutParts.unshift('BACK-TO-BACK');
+          this.isNextSuper = true;
         }
         this.b2b = true;
       } else {
@@ -934,6 +1006,7 @@ export class ColorEngine {
         this.allClears++;
         allClearBonus = cleared === 4 ? 3200 : 1800;
         calloutParts.push('ALL CLEAR!');
+        this.isNextSuper = true;
       }
 
       this.score += (baseScore + allClearBonus) * this.level + comboBonus;
@@ -946,8 +1019,13 @@ export class ColorEngine {
         levelChanged = this.level > prevLevel;
       }
 
+      if (this.lines >= this.nextSuperAtLines) {
+        while (this.lines >= this.nextSuperAtLines) this.nextSuperAtLines += 8;
+        this.isNextSuper = true;
+      }
+
       if (isDifficult || allClearBonus > 0 || cleared >= 4) {
-        this.hitstopTimer = 0.045;
+        this.hitstopTimer = Math.max(this.hitstopTimer, 0.045);
         this.shakeTrauma = Math.min(1, this.shakeTrauma + 0.45);
       } else {
         this.shakeTrauma = Math.min(1, this.shakeTrauma + 0.16);
@@ -958,6 +1036,35 @@ export class ColorEngine {
         this.score += baseScore * this.level;
         if (this.score > this.bestScore) this.bestScore = this.score;
       }
+    }
+
+    // Super Block 5x5 Shockwave Blast on remaining surrounding blocks
+    let blastedCells = 0;
+    if (wasSuper) {
+      this.isSuperActive = false;
+      this.superBlasts++;
+      const minX = Math.max(0, Math.floor(impactCx) - 2);
+      const maxX = Math.min(C_COLS - 1, Math.floor(impactCx) + 2);
+      const minY = Math.max(C_VISIBLE_START, Math.floor(impactCy) - 2);
+      const maxY = Math.min(C_ROWS - 1, Math.floor(impactCy) + 2);
+      for (let y = minY; y <= maxY; y++) {
+        const rowOffset = y * C_COLS;
+        for (let x = minX; x <= maxX; x++) {
+          if (this.board[rowOffset + x] !== 0) {
+            this.board[rowOffset + x] = 0;
+            blastedCells++;
+          }
+        }
+      }
+      this.blastFlashTimer = 0.28;
+      this.hitstopTimer = Math.max(this.hitstopTimer, 0.055);
+      this.shakeTrauma = Math.min(1, this.shakeTrauma + 0.65);
+      this.spawnBlastParticles(impactCx, this.lastImpactY);
+      this.score += (blastedCells * 100 + 250) * this.level;
+      if (this.score > this.bestScore) this.bestScore = this.score;
+      calloutParts.unshift(blastedCells > 0 ? `SUPER BLAST! +${blastedCells}` : 'SUPER BLAST!');
+    } else if (this.isNextSuper && cleared > 0) {
+      calloutParts.push('SUPER READY!');
     }
 
     if (calloutParts.length > 0) {
@@ -985,6 +1092,7 @@ export class ColorEngine {
       return 'gameOver';
     }
 
+    if (wasSuper) return 'blast';
     if (tSpin !== 'none' && cleared > 0) return 'tspin';
     if (cleared === 4) return 'quad';
     if (cleared === 3) return 'line3';
@@ -1029,11 +1137,15 @@ export class ColorEngine {
       tSpins: this.tSpins,
       quads: this.quads,
       allClears: this.allClears,
+      superBlasts: this.superBlasts,
+      isSuperActive: this.isSuperActive,
+      isNextSuper: this.isNextSuper,
       piecesPlaced: this.piecesPlaced,
       elapsedSec: this.elapsedSec,
       remainingSec: this.remainingSec,
       pps,
       holdId: this.holdId,
+      holdIsSuper: this.holdIsSuper,
       canHold: this.canHold,
       nextIds,
       lastCallout: this.calloutTimer > 0 ? this.lastCallout : '',

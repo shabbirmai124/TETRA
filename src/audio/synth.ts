@@ -12,6 +12,7 @@ export type SoundEvent =
   | 'quad'
   | 'tspin'
   | 'levelUp'
+  | 'blast'
   | 'gameOver'
   | 'victory';
 
@@ -98,6 +99,11 @@ class SoundSynth {
         this.tone(ctx, 587.33, 587.33, 0.08, 'triangle', 0.25 * masterGain, now);
         this.tone(ctx, 739.99, 739.99, 0.08, 'triangle', 0.25 * masterGain, now + 0.08);
         this.tone(ctx, 880, 1174.66, 0.2, 'triangle', 0.3 * masterGain, now + 0.16);
+        break;
+      case 'blast':
+        this.tone(ctx, 130, 34, 0.26, 'sawtooth', 0.34 * masterGain, now);
+        this.tone(ctx, 220, 48, 0.22, 'triangle', 0.36 * masterGain, now);
+        this.tone(ctx, 520, 1320, 0.18, 'sine', 0.24 * masterGain, now + 0.03);
         break;
       case 'victory':
         this.tone(ctx, 523.25, 523.25, 0.1, 'triangle', 0.28 * masterGain, now);

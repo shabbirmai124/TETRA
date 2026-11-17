@@ -135,3 +135,48 @@ test('ColorEngine Sprint 40L triggers victory at 40 lines and Ultra expires at 1
   assert.equal(ultra.victory, true);
   assert.equal(ultra.remainingSec, 0);
 });
+
+test('ColorEngine rewards Super Block, preserves holdIsSuper, triggers 5x5 Blast, and emits fire sparks', () => {
+  const engine = new ColorEngine('marathon', 707);
+  engine.board.fill(0);
+  for (let x = 0; x < C_COLS; x++) {
+    if (x < 3 || x > 6) engine.board[(C_ROWS - 1) * C_COLS + x] = ColorPieceId.S;
+  }
+
+  engine.activeId = ColorPieceId.I;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  assert.equal(engine.hardDrop(), 'line1');
+  assert.equal(engine.allClears, 1);
+  assert.equal(engine.isSuperActive, true);
+
+  assert.equal(engine.hold(), true);
+  assert.equal(engine.holdIsSuper, true);
+  assert.equal(engine.isSuperActive, false);
+
+  engine.hardDrop();
+  assert.equal(engine.hold(), true);
+  assert.equal(engine.isSuperActive, true);
+
+  // Fill cells around center (col 2..6, bottom row) on a clean board and hard drop O-piece Super Block
+  engine.board.fill(0);
+  for (let x = 2; x <= 6; x++) {
+    engine.board[(C_ROWS - 1) * C_COLS + x] = ColorPieceId.Z;
+  }
+  engine.activeId = ColorPieceId.O;
+  engine.activeRot = 0;
+  engine.activeX = 3;
+  engine.activeY = 2;
+  engine.move(1);
+  engine.move(-1);
+  const ev = engine.hardDrop();
+  assert.equal(ev, 'blast');
+  assert.equal(engine.superBlasts, 1);
+  assert.equal(engine.board[(C_ROWS - 1) * C_COLS + 4], 0);
+  assert.equal(engine.board[(C_ROWS - 1) * C_COLS + 5], 0);
+  engine.tick(0.016);
+  assert.ok(engine.activeParticlesCount > 0);
+});

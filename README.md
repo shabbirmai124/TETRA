@@ -25,17 +25,17 @@ Engineered from the ground up for ultra-low memory consumption, minimal battery/
 - **44-Byte Row Bitboard (`Uint16Array(22)`)**: Each row of the 10×22 matrix is stored as a single 16-bit integer (bits `0..9`), enabling O(1) bitwise collision checks and instant full-row detection (`row === 0x3FF`).
 - **Packed 4×4 Piece Masks & Flat Kick Tables**: All 28 piece rotation states reside in a 56-byte `Uint16Array`, while SRS + 180° wall kicks reside in flat `Int8Array` lookup tables.
 - **Event-Driven Low-Power & 1995-Hardware Ready**:
-  - Pre-bakes a `28×28` block sprite, dashed ghost sprite, and static matrix grid onto offscreen canvases once so every frame uses pure integer `drawImage()` blits instead of per-cell stroke/fill calls.
-  - Computes the exact millisecond delay until the next gravity step, lock timer, or callout expiry via `getNextWakeDelayMs()`, sleeping with `setTimeout` instead of spinning a 60 Hz `requestAnimationFrame` loop while idle.
-  - Drops to **0% CPU** when paused or on Game Over (canceling all timers and animation frames).
-  - Uses zero-allocation integer dirty-checking (`boardRevision`) on an opaque `{ alpha: false }` Canvas 2D backbuffer while maintaining **0 ms input latency** on keydown or touch.
-- **Complete Classic & Modern Ruleset**: 7-bag randomizer (`Uint8Array`), Hold piece, 3-piece Next queue, dashed Ghost piece, SRS + 180° rotation (`A`), Back-to-Back Quads (1.5×), Combo chains, All Clear bonuses, configurable Start Level `1–15`, and local best-score persistence.
+  - Pre-bakes `28×28` architectural monochrome wireframe, Super crosshair, and dashed ghost sprites plus a static matrix grid onto offscreen canvases once so every frame uses pure integer `drawImage()` blits.
+  - Frames the monochrome playfield with a static layered rocky cave & hill cliff backdrop (zero runtime CPU/animation overhead).
+  - Computes the exact millisecond delay until the next gravity step, lock timer, or callout expiry via `getNextWakeDelayMs()`, sleeping with `setTimeout` instead of spinning a 60 Hz `requestAnimationFrame` loop while idle, waking briefly only during active sparks/flashes and dropping to **0% CPU** when paused or on Game Over.
+- **Complete Classic & Modern Ruleset + Super Block Blast**: 7-bag randomizer (`Uint8Array`), Hold piece (with `holdIsSuper` preservation), 3-piece Next queue, dashed Ghost piece, SRS + 180° rotation (`A`), Back-to-Back Quads (1.5×), Combo chains, All Clear bonuses, **Super Block Rewards** (earned on Quad, All Clear, or every 8 lines) triggering a **5×5 Shockwave Blast** (`+100 × cells + 250 × level`), monochrome laser-beam/starburst line-clear FX, and a 48-spark `Float32Array` burst pool.
 
 ### 2. `color/` — Advanced Modern Color Edition (`color/engine.ts` + `color/ColorGame.tsx`)
-Built for high-speed competitive play, crisp visual feedback, and retro-class CPU efficiency:
+Built for high-speed competitive play, crisp crystal visuals, fiery impact FX, and retro-class CPU efficiency:
 - **240-Byte Compact Matrix (`Uint8Array(240)`)**: Stores the 10×24 playfield (rows `0..3` spawn buffer + rows `4..23` visible matrix) using 1 byte per cell.
-- **Pre-Baked `196×28` Faceted Sprite Atlases**: Pre-renders all 7 faceted jewel blocks and ghost outlines onto offscreen sprite sheets once at startup, replacing ~1,400 per-frame vector polygon calls with pure integer `drawImage()` blits.
-- **Zero-GC Pooled Particle Ring Buffer**: Pre-allocated `Float32Array(64 * 7)` (1,792 bytes, zero runtime allocations) drives hard-drop sparks and line-clear bursts alongside 45 ms hitstop, line-clear flash sweeps, and decaying `trauma²` camera shake.
+- **Pre-Baked `224×28` 3D Crystal Prism Sprite Atlases**: Pre-renders all 7 jewel blocks (`#00D8F5` Cyan, `#F59E0B` Amber-Gold, `#A855F7` Amethyst, `#10B981` Emerald, `#F43F5E` Ruby, `#2563EB` Cobalt, `#FB923C` Topaz) plus Slot 8 (`#FACC15` Solar Super Diamond) with diagonal 3D-cut specular facets and ghost outlines once at startup.
+- **Zero-GC Fire-Spark & Starburst FX (`Float32Array(72 × 7)`)**: Fixed 2,016-byte ring buffer drives streaking fiery white-gold-orange embers (`colorId === 0`) and crystal shards alongside horizontal laser-beam sweeps, radial starburst flares, shockwave rings, 45–55 ms hitstop, and decaying `trauma²` camera shake.
+- **Super Block Reward & 5×5 Blast**: Clearing a Quad, T-Spin line clear, All Clear, or reaching every 8 lines charges the next piece as a Solar Super Diamond (`holdIsSuper` preserved on Hold swaps) that detonates a 5×5 Blast on landing.
 - **Adaptive Low-Power Scheduler & Flat Hardware UI**: Uses an opaque `{ alpha: false }` canvas, blits the cached offscreen matrix grid, eliminates CSS blur shadows and multi-stop gradients for software rasterizers, and exits 60 FPS `requestAnimationFrame` into event-driven `getNextWakeDelayMs()` sleep whenever particles/shake settle and no movement keys are held.
 - **Full Super Rotation System (SRS) + 180°**: Complete CW, CCW, and 180° rotation with JLSTZ, I, and 180° kick tables.
 - **T-Spin & Mini T-Spin Detection**: Implements the 3-corner T-slot rule around the T-piece center with front-corner + 5th kick verification (`T-Spin Zero`, `Mini`, `Single`, `Double`, `Triple`).
@@ -59,7 +59,7 @@ Built for high-speed competitive play, crisp visual feedback, and retro-class CP
 | **7-Bag Buffers** | `Uint8Array(14)` — **14 bytes** | `Uint8Array(14)` — **14 bytes** | Dual pre-allocated Fisher–Yates bags (zero GC) |
 | **Piece Bitmasks** | `Uint16Array(28)` — **56 bytes** | `Uint16Array(28)` — **56 bytes** | 4×4 rotation masks packed into 16 bits |
 | **Clearing Row Flags** | Bitwise `number` register | `Uint8Array(24)` — **24 bytes** | Row-clear flash tracking |
-| **Particle Ring Pool** | None (0 bytes) | `Float32Array(64 × 7)` — **1,792 bytes** | Fixed circular buffer, zero heap churn |
+| **Particle Ring Pool** | `Float32Array(48 × 5)` UI FX (0B engine) | `Float32Array(72 × 7)` — **2,016 bytes** | Fixed circular buffer, zero heap churn |
 | **Canvas Backbuffer** | `{ alpha: false }` + Offscreen Grid Cache | `{ alpha: false }` + Offscreen Grid Cache | Single `drawImage()` grid blit + dirty check |
 
 ### Scoring & Multiplier Specification
@@ -68,11 +68,12 @@ Built for high-speed competitive play, crisp visual feedback, and retro-class CP
 | :--- | :--- | :--- |
 | **Soft Drop / Hard Drop** | `1 pt / cell` · `2 pts / cell` | No |
 | **Single / Double / Triple** | `100` · `300` · `500` | Resets B2B |
-| **Quad (4-Line Clear)** | `800` | Yes (`1.5×` = `1,200`) |
-| **Mini T-Spin (0 / 1 Line)** *(Color)* | `100` · `200` | Yes on line clear (`1.5×`) |
-| **T-Spin (0 / 1 / 2 / 3 Lines)** *(Color)* | `400` · `800` · `1,200` · `1,600` | Yes on line clear (`1.5×`) |
+| **Quad (4-Line Clear)** | `800` | Yes (`1.5×` = `1,200`) + Super Charge |
+| **Mini T-Spin (0 / 1 Line)** *(Color)* | `100` · `200` | Yes on line clear (`1.5×`) + Super Charge |
+| **T-Spin (0 / 1 / 2 / 3 Lines)** *(Color)* | `400` · `800` · `1,200` · `1,600` | Yes on line clear (`1.5×`) + Super Charge |
+| **Super Block 5×5 Blast** | `+100 × blasted cells + 250` | Earned on Quad / T-Spin / All Clear / every 8 lines |
 | **Combo Chain (Ren)** | `+50 × combo × level` | Stacks with B2B |
-| **All Clear (Perfect Clear)** | `+1,800` (1–3L) / `+3,200` (Quad) | Stacks with B2B & Combo |
+| **All Clear (Perfect Clear)** | `+1,800` (1–3L) / `+3,200` (Quad) | Stacks with B2B & Combo + Super Charge |
 
 ### Gravity, Lock Delay & Handling Specs
 - **Gravity Curve**: `interval(level) = max(0.015s, (0.8 - (L - 1) × 0.007)^(L - 1))` where `L = min(19, level - 1)` (constant `0.9s` in Zen mode).

@@ -247,8 +247,8 @@ export const PauseModal: React.FC<PauseModalProps> = ({
             </div>
             <p className={`border-t pt-2 text-xs ${isMono ? 'border-neutral-800 text-neutral-400' : 'border-slate-700 text-slate-400'}`}>
               {isMono
-                ? 'Chain Quads for Back-to-Back 1.5x multipliers, Combos, and All Clear bonuses.'
-                : 'Chain consecutive Quads or T-Spins for Back-to-Back 1.5x multipliers, Combos, and All Clear bonuses.'}
+                ? 'Chain Quads for Back-to-Back 1.5x multipliers, Combos, All Clears, and Super Block 5x5 Blasts every Quad or 8 lines.'
+                : 'Chain Quads or T-Spins for Back-to-Back 1.5x multipliers, Combos, All Clears, and Super Block 5x5 Blasts.'}
             </p>
           </div>
         )}
@@ -326,7 +326,7 @@ export const EndModal: React.FC<EndModalProps> = ({
               Quads: <strong className="font-telemetry text-white">{noColorResult.quads}</strong>
             </span>
             <span>
-              B2B: <strong className="font-telemetry text-white">{noColorResult.b2bCount}</strong>
+              Blasts: <strong className="font-telemetry text-white">{noColorResult.superBlasts}</strong>
             </span>
             <span>
               All Clear: <strong className="font-telemetry text-white">{noColorResult.allClears}</strong>
@@ -341,6 +341,9 @@ export const EndModal: React.FC<EndModalProps> = ({
             </span>
             <span>
               Quads: <strong className="font-telemetry text-white">{colorResult.quads}</strong>
+            </span>
+            <span>
+              Blasts: <strong className="font-telemetry text-white">{colorResult.superBlasts}</strong>
             </span>
             <span>
               PPS: <strong className="font-telemetry text-white">{colorResult.pps.toFixed(1)}</strong>
